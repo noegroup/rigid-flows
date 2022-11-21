@@ -1,8 +1,0 @@
-Metadata-Version: 2.1
-Name: ribflox
-Version: 0.1.0
-Summary: flows for rigid bodies
-Home-page: https://github.com/noegroup/rigid-flows.git
-Author: Jonas Köhler
-Author-email: jonas.koehler.ks@gmail.com
-Requires-Python: >3.10

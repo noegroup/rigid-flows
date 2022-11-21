@@ -3,7 +3,6 @@ from setuptools import find_packages, setup
 setup(
     name="ribflox",
     packages=["ribflox"],
-    package_dir={"": "code"}
     version="0.1.0",
     url="https://github.com/noegroup/rigid-flows.git",
     author="Jonas Köhler",

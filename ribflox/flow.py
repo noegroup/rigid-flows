@@ -152,10 +152,14 @@ class ManifoldShift(Transform[VectorN, VectorN]):
     shift: VectorN
 
     def forward(self, inp: VectorN):
-        return Transformed(self.torus.shift(inp, self.shift), jnp.zeros(()))
+        return Transformed(
+            self.torus.shift(inp, self.shift), jnp.zeros(())
+        )
 
     def inverse(self, inp: VectorN):
-        return Transformed(self.torus.shift(inp, -self.shift), jnp.zeros(()))
+        return Transformed(
+            self.torus.shift(inp, -self.shift), jnp.zeros(())
+        )
 
 
 class TorusShiftDecoder(eqx.Module):
@@ -186,7 +190,7 @@ class TorusShiftDecoder(eqx.Module):
         self, state: State, latent: Array
     ) -> VectorizedTransform[VectorN, VectorN]:
         shift = self.net(latent).reshape(self.out_shape)
-        box = jnp.tile(state.box[None], (self.num_mol, 1))
+        box = jnp.tile(state.box[None], reps=(self.num_mol, 1))
         return VectorizedTransform(ManifoldShift(geom.Torus(box), shift))
 
 

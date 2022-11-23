@@ -22,6 +22,8 @@ __all__ = [
     "RigidRepresentation",
     "AtomRepresentation",
     "RigidTransform",
+    "Box",
+    "State",
 ]
 
 
@@ -49,10 +51,20 @@ Representation = TypeVar(
 
 
 @pytree_dataclass(frozen=True)
+class Box:
+    min: jnp.ndarray
+    max: jnp.ndarray
+
+    @property
+    def size(self):
+        return self.max - self.min
+
+
+@pytree_dataclass(frozen=True)
 class State(Generic[Representation]):
     mol: Representation
     aux: Auxiliary
-    box: BoxSize
+    box: Box
 
 
 def to_rigid(pos: AtomRepresentation) -> Transformed[RigidRepresentation]:

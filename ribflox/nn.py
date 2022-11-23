@@ -70,13 +70,14 @@ class PosEncoder(eqx.Module):
         key: KeyArray
     ):
         self.encoder = dense(
-            units=(2 * num_mol * POS_DIM, *hidden, num_out),
+            units=(num_mol * POS_DIM, *hidden, num_out),
             activation=activation,
             key=key,
         )
 
     def __call__(self, box_and_pos, key: KeyArray | None = None):
         box, pos = box_and_pos
+        return self.encoder(pos.reshape(-1))
         return self.encoder(
             jnp.concatenate(
                 [

@@ -14,6 +14,7 @@ import flox
 import flox.geom as geom
 from flox._src.geom.manifold import VectorN
 from flox._src.nn.modules import dense
+from flox._src.util.func import LensLike
 from flox.flow import (
     Affine,
     ConvexPotential,
@@ -111,14 +112,15 @@ class SimpleStep(eqx.Module, Generic[S, A, B, X]):
         )
 
 
-class WrappedLens(eqx.Module):
+@pytree_dataclass(frozen=True)
+class WrappedLens(LensLike[S, S, T, T]):
 
     lens: lenses.ui.UnboundLens
 
-    def inject(self, state, new):
+    def inject(self, state: S, new: T) -> S:
         return self.lens.set(new)(state)
 
-    def project(self, state):
+    def project(self, state: S) -> T:
         return self.lens.get()(state)
 
 
@@ -152,14 +154,10 @@ class ManifoldShift(Transform[VectorN, VectorN]):
     shift: VectorN
 
     def forward(self, inp: VectorN):
-        return Transformed(
-            self.torus.shift(inp, self.shift), jnp.zeros(())
-        )
+        return Transformed(self.torus.shift(inp, self.shift), jnp.zeros(()))
 
     def inverse(self, inp: VectorN):
-        return Transformed(
-            self.torus.shift(inp, -self.shift), jnp.zeros(())
-        )
+        return Transformed(self.torus.shift(inp, -self.shift), jnp.zeros(()))
 
 
 class TorusShiftDecoder(eqx.Module):
@@ -179,7 +177,7 @@ class TorusShiftDecoder(eqx.Module):
         key: KeyArray
     ):
         self.net = dense(
-            units=(num_inp, *hidden, num_mol * num_out),
+            units=(num_inp, *hidden, num_mol * num_out * 2),
             activation=activation,
             key=key,
         )
@@ -188,10 +186,14 @@ class TorusShiftDecoder(eqx.Module):
 
     def __call__(
         self, state: State, latent: Array
-    ) -> VectorizedTransform[VectorN, VectorN]:
-        shift = self.net(latent).reshape(self.out_shape)
+    ):  # -> VectorizedTransform[VectorN, VectorN]:
+        # shift = self.net(latent).reshape(self.out_shape)
+        (shift,), (scale,) = jnp.split(
+            self.net(latent).reshape(self.out_shape), 2, 0
+        )
         box = jnp.tile(state.box[None], reps=(self.num_mol, 1))
-        return VectorizedTransform(ManifoldShift(geom.Torus(box), shift))
+        return VectorizedTransform(Affine(shift, scale))
+        return VectorizedTransform(ManifoldShift(geom.Torus(box), 1e-1 * shift))
 
 
 class AffineDecoder(eqx.Module):
@@ -221,7 +223,7 @@ class AffineDecoder(eqx.Module):
         (shift,), (scale,) = jnp.split(
             self.net(latent).reshape(self.out_shape), 2, 0
         )
-        return VectorizedTransform(Affine(shift, scale))
+        return VectorizedTransform(Affine(1e-1 * shift, 1e-1 * scale))
 
 
 class ConvexPotentialGradientDecoder(eqx.Module):
@@ -259,7 +261,11 @@ class ConvexPotentialGradientDecoder(eqx.Module):
         ctrlpts = ctrlpts.reshape(
             *state.mol.rot.shape[:-1], -1, state.mol.rot.shape[-1]
         )
-        return VectorizedTransform(ConvexPotential(ctrlpts, weights, bias))
+        return VectorizedTransform(
+            ConvexPotential(
+                ctrlpts, 1e-1 * weights, 1e-1 * bias, eps=jnp.array(1e-4)
+            )
+        )
 
 
 def rot_step(
@@ -453,13 +459,13 @@ def full_step(
             aux_step(
                 next(chain), num_mol, num_auxiliaries, num_latent, num_hidden
             ),
-            rot_step(
-                next(chain),
-                num_mol,
-                num_auxiliaries,
-                num_latent,
-                num_hidden,
-                num_ctrl_pts,
-            ),
+            # rot_step(
+            #     next(chain),
+            #     num_mol,
+            #     num_auxiliaries,
+            #     num_latent,
+            #     num_hidden,
+            #     num_ctrl_pts,
+            # ),
         ]
     )

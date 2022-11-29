@@ -19,7 +19,6 @@ except:
     nv = None
 
 
-
 def setup_simulation(model, temperature, frictionCoeff=1/unit.picosecond, stepSize=1*unit.femtosecond, minimizeEnergy=False):
     integrator = openmm.LangevinMiddleIntegrator(temperature, frictionCoeff, stepSize)
     for force in model.system.getForces():
@@ -32,8 +31,9 @@ def setup_simulation(model, temperature, frictionCoeff=1/unit.picosecond, stepSi
         print('old energy:', simulation.context.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole))
         simulation.minimizeEnergy() #volume is not changed
         print('new energy:', simulation.context.getState(getEnergy=True).getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole))
-    
+
     return simulation
+
 
 class WaterModel():
     def __init__(self, positions, box, water_type='tip4pew', nonbondedCutoff=1, barostat=None, external_field=None):
@@ -45,15 +45,15 @@ class WaterModel():
             n_sites = int(''.join(x for x in water_type if x.isdigit())) #get n_sites from water_type name
         assert len(positions) % n_sites == 0, 'mismatch between number of atoms per molecule and total number of atoms'
         n_waters = len(positions) // n_sites
-        
+
         mdtraj_topology = self.generate_mdtraj_topology(n_waters, n_sites)
-        
+
         topology = mdtraj_topology.to_openmm()
         topology.setPeriodicBoxVectors(box)
-        
+
         if nonbondedCutoff > np.diagonal(box).min()/2:
             nonbondedCutoff = np.diagonal(box).min()/2
-            print(f'+++ WARNING: `nonbondedCutoff` too large, changed to {nonbondedCutoff} +++', file=stderr)            
+            print(f'+++ WARNING: `nonbondedCutoff` too large, changed to {nonbondedCutoff} +++', file=stderr)
 
         ff = openmm.app.ForceField(water_type + '.xml')
         system = ff.createSystem(
@@ -68,11 +68,11 @@ class WaterModel():
         forces['NonbondedForce'].setUseSwitchingFunction(False)
         forces['NonbondedForce'].setUseDispersionCorrection(True)
         forces['NonbondedForce'].setEwaldErrorTolerance(1e-4)
-        
+
         self.system = system
         self.topology = topology
         self.mdtraj_topology = mdtraj_topology
-        
+
         self.set_barostat(barostat)
         self.set_external_field(external_field)
 
@@ -84,26 +84,26 @@ class WaterModel():
         self.n_sites = n_sites
         self.water_type = water_type
         self.nonbondedCutoff = nonbondedCutoff
-    
+
     @property
     def positions(self):
         return self._positions
-    
+
     @positions.setter
     def positions(self, positions):
         self._positions = np.array(positions)
-    
+
     @property
     def box(self):
         return self._box
-    
+
     @box.setter
     def box(self, box):
         self._box = np.array(box)
         self.topology.setPeriodicBoxVectors(box)
         self.system.setDefaultPeriodicBoxVectors(*box)
         self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diagonal(box)))
-    
+
     @staticmethod
     def generate_mdtraj_topology(n_waters, n_sites=4):
         assert n_sites >= 3, 'only 3 or more sites are supported'
@@ -122,7 +122,7 @@ class WaterModel():
             water_top.add_bond(water_top.atom(n_sites*i), water_top.atom(n_sites*i+1))
             water_top.add_bond(water_top.atom(n_sites*i), water_top.atom(n_sites*i+2))
         return water_top
-    
+
     def set_barostat(self, barostat, pressure=1*unit.bar, temperature=300*unit.kelvin):
         """ 
             three possible barostats: 'iso', 'aniso', 'tri'
@@ -143,9 +143,9 @@ class WaterModel():
             self.system.addForce(openmm.MonteCarloFlexibleBarostat(pressure, temperature))
         else:
             raise ValueError(f'Unknown barostat: {barostat}')
-        
+
         self.barostat = barostat
-    
+
     def set_external_field(self, external_field):
         """ external_field should be a 3D list """
         #make sure no other external_field is defined
@@ -171,9 +171,8 @@ class WaterModel():
             raise ValueError('`external_field` must be a 3-element list')
 
         self.external_field = external_field
-    
+
     def save_to_json(self, filename):
-        
         init_info = {
             'positions': self._positions.tolist(), 
             'box': self._box.tolist(),
@@ -184,19 +183,19 @@ class WaterModel():
         }
         with open(filename, 'w') as f:
             json.dump(init_info, f)
-    
+
     @staticmethod
     def load_from_json(filename):
         with open(filename, 'r') as f:
             init_info = json.load(f)
         return WaterModel(**init_info)
-    
+
     def get_view(self, pos=None, box=None):
         """ visualize in notebook with nglview """
         if nv is None:
             print('+++ WARNING: nglview not available +++', file=stderr)
             return None
-        
+
         if pos is None:
             pos = self._positions
         if box is None:
@@ -207,38 +206,65 @@ class WaterModel():
         view.add_representation('ball+stick', selection='water')
         view.add_unitcell()
         return view
-    
+
+
 #some plotting functions
 def plot_energy(ene):
-    plt.figure(figsize=(15,4))
-    plt.subplot(1,2,1)
+    plt.figure(figsize=(15, 4))
+
+    plt.subplot(1, 2, 1)
     plt.plot(ene, '.')
     plt.xlim(0, len(ene))
     plt.xlabel('time')
     plt.ylabel('energy [kJ/mol]')
-    
-    plt.subplot(1,2,2)
+
+    plt.subplot(1, 2, 2)
     plt.hist(ene, bins='auto')
     plt.xlabel('energy [kJ/mol]')
 
     plt.show()
 
-def plot_2Dview(pos, box, n_sites=4):
-    plt.figure(figsize=(15,4))
 
+def plot_2Dview(pos, box, n_sites=4, alpha=0.05):
+    av_box = box.mean(axis=0) if len(box.shape) == 3 else box
+    non_orthorombic = np.count_nonzero(av_box - np.diag(np.diagonal(av_box)))
+
+    plt.figure(figsize=(15, 4))
     for i in range(3):
         ii = (i + 1) % 3
-        plt.subplot(1,3,1+i)
-        for j in range(0, pos.shape[1], n_sites):
-            plt.plot(pos[:, j+1:j+3, i], pos[:, j+1:j+3, ii], '.', alpha=0.05, c='gray')
-            plt.plot(pos[:, j, i], pos[:, j, ii], '.', alpha=0.05, c='r')
-        #TODO generalize for triclinic box
-        plt.axvline(0, c='k', ls=':')
-        plt.axhline(0, c='k', ls=':')
-        plt.axvline(box[:, i, i].mean(), c='k', ls=':')
-        plt.axhline(box[:,ii,ii].mean(), c='k', ls=':')
-        plt.xlabel(f'x{i}')
-        plt.ylabel(f'x{ii}')
-        plt.gca().set_aspect(1)
+        iii = (i + 2) % 3
+        plt.subplot(1, 3, 1+i)
 
+        #draw particles
+        plt.plot(pos[..., 1::n_sites, i], pos[..., 1::n_sites, ii], '.', alpha=alpha, c='gray')
+        plt.plot(pos[..., 2::n_sites, i], pos[..., 2::n_sites, ii], '.', alpha=alpha, c='gray')
+        plt.plot(pos[..., ::n_sites, i], pos[..., ::n_sites, ii], '.', alpha=alpha, c='r')
+
+        #draw box
+        coord = [
+            [0, 0],
+            [av_box[i,i], av_box[i,ii]],
+            [av_box[i,i] + av_box[ii,i], av_box[i,ii] + av_box[ii,ii]],
+            [av_box[ii,i], av_box[ii,ii]],
+            [0, 0]
+        ]
+        xs, ys = zip(*coord)
+        plt.plot(xs, ys, 'k:')
+        if non_orthorombic:
+            coord2 = [
+                coord[1],
+                [coord[1][0] + av_box[iii,i], coord[1][1] + av_box[iii,ii]],
+                [coord[2][0] + av_box[iii,i], coord[2][1] + av_box[iii,ii]],
+                [coord[3][0] + av_box[iii,i], coord[3][1] + av_box[iii,ii]],
+                coord[3],
+            ]
+            xs, ys = zip(*coord2)
+            plt.plot(xs, ys, 'k:')
+            coord = [coord[2], coord2[2]]
+            xs, ys = zip(*coord)
+            plt.plot(xs, ys, 'k:')
+
+        plt.xlabel(f'x{i} [nm]')
+        plt.ylabel(f'x{ii} [nm]')
+        plt.gca().set_aspect(1)
     plt.show()

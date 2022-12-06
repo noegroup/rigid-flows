@@ -80,7 +80,7 @@ if __name__ == "__main__":
     pp = pprint.PrettyPrinter()
 
     logger.info(f"Logging tensorboard logs to {specs.logger_dir}.")
-    summary_writer = SummaryWriter()
+    summary_writer = SummaryWriter(specs.logger_dir)
 
     prefix = ("train",)
 

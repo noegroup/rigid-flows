@@ -257,7 +257,7 @@ class TargetDensity(DensityModel[AugmentedData]):
         data = Data.from_specs(sys_specs)
         model = OpenMMEnergyModel.from_specs(sys_specs)
         if sys_specs.recompute_forces:
-            data.recompute_forces(model)
+            data = data.recompute_forces(model)
 
         return TargetDensity(
             auxiliary_shape=auxiliary_shape,

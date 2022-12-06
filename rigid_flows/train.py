@@ -42,7 +42,7 @@ def flow_force(
     base: DensityModel,
     flow: Transform[AugmentedData, State],
 ):
-    return -jax.grad(negative_log_likelihood)(inp, base, flow)
+    return -jax.grad(negative_log_likelihood)(inp, base, flow).pos
 
 
 # timeseries

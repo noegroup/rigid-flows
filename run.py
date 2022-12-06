@@ -85,7 +85,7 @@ if __name__ == "__main__":
 
     now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
     logger_dir = f"{specs.logger_dir}/run-{now}"
-    summary_writer = SummaryWriter(f"{specs.logger_dir}/logs")
+    summary_writer = SummaryWriter(f"{logger_dir}")
     shutil.copy(args.specs, f"{logger_dir}/config.yaml")
 
     prefix = ("train",)

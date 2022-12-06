@@ -15,13 +15,13 @@ from optax import (
     safe_root_mean_squares,
 )
 
-from experiments.rigid_flows.rigid_flows.reporting import Reporter
 from flox.flow import Transform
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .density import DensityModel
 from .flow import State
+from .reporting import Reporter
 
 KeyArray = Array | jax.random.PRNGKeyArray
 

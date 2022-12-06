@@ -83,7 +83,7 @@ class OpenMMEnergyModel:
         pos: np.ndarray,
         box: np.ndarray,
     ):
-        energies = np.empty(pos.shape[0])
+        energies = np.empty(pos.shape[0], dtype=np.float32)
         forces = np.empty_like(pos, dtype=np.float32)
 
         assert box.shape == (3, 3), f"box.shape = {box.shape}"

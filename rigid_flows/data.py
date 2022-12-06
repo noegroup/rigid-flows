@@ -36,15 +36,14 @@ class Data:
         return data
 
     def recompute_forces(self, model: OpenMMEnergyModel):
+        _, forces = model.compute_energies_and_forces(
+            np.array(self.pos), np.diag(np.array(self.box[0]))
+        )
         return Data(
             pos=self.pos,
             box=self.box,
             energy=self.energy,
-            force=jnp.array(
-                model.compute_energies_and_forces(
-                    np.array(self.pos), np.diag(np.array(self.box[0]))
-                )
-            ),
+            force=jnp.array(forces),
         )
 
 

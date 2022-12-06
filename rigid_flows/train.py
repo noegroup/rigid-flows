@@ -45,6 +45,9 @@ def flow_force(
     return -jax.grad(negative_log_likelihood)(inp, base, flow)
 
 
+# timeseries
+
+
 def force_matching_loss(
     inp: AugmentedData,
     base: DensityModel,
@@ -188,7 +191,7 @@ class Trainer:
         opt_state: OptState,
     ):
         loss, grad = eqx.filter_value_and_grad(
-            lambda key: batch_loss(
+            lambda flow: batch_loss(
                 key=key,
                 flow=flow,
                 base=self.base,
@@ -199,7 +202,7 @@ class Trainer:
                 weight_fe=self.weight_fe,
                 fm_aggregation=self.fm_aggregation,
             )
-        )(key)
+        )(flow)
         updates, opt_state = self.optim.update(grad, opt_state)
         flow = cast(Flow, eqx.apply_updates(flow, updates))
         return loss, flow, opt_state

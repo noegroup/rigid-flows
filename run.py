@@ -12,11 +12,11 @@ from rigid_flows.density import (
     TargetSpecification,
 )
 from rigid_flows.flow import FlowSpecification, build_flow
+from rigid_flows.reporting import Reporter
 from rigid_flows.system import SystemSpecification
-from rigid_flows.train import Trainer, TrainingSpecification, run_training_stage
+from rigid_flows.train import TrainingSpecification, run_training_stage
 from tensorboardX import SummaryWriter
 
-from experiments.rigid_flows.rigid_flows.reporting import Reporter
 from flox.util import key_chain
 
 logger = logging.getLogger("run.example")

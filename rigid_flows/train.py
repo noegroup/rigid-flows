@@ -1,5 +1,4 @@
 from functools import partial
-from logging import Logger
 from typing import cast
 
 import equinox as eqx

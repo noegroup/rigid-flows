@@ -1,6 +1,8 @@
 import argparse
+import datetime
 import logging
 import pprint
+import shutil
 from typing import cast
 
 from jax_dataclasses import pytree_dataclass
@@ -80,7 +82,11 @@ if __name__ == "__main__":
     pp = pprint.PrettyPrinter()
 
     logger.info(f"Logging tensorboard logs to {specs.logger_dir}.")
-    summary_writer = SummaryWriter(specs.logger_dir, comment="output")
+
+    now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
+    logger_dir = f"{specs.logger_dir}/run-{now}"
+    summary_writer = SummaryWriter(f"{specs.logger_dir}/logs")
+    shutil.copy(args.specs, f"{logger_dir}/config.yaml")
 
     prefix = ("train",)
 

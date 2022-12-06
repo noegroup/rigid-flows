@@ -9,6 +9,7 @@ import equinox as eqx
 import tensorflow as tf  # type: ignore
 from jax_dataclasses import pytree_dataclass
 from rigid_flows.config import from_yaml, pretty_json, to_yaml
+from rigid_flows.data import AugmentedData
 from rigid_flows.density import (
     BaseDensity,
     BaseSpecification,
@@ -19,7 +20,6 @@ from rigid_flows.flow import FlowSpecification, State, build_flow
 from rigid_flows.system import SystemSpecification
 from rigid_flows.train import TrainingSpecification, run_training_stage
 
-from experiments.rigid_flows.rigid_flows.data import AugmentedData
 from flox.flow import Pipe
 from flox.util import key_chain
 

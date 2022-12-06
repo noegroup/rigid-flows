@@ -6,7 +6,7 @@ run_dir: "./runs"
 model:
 
   # set if model is trained with warm start
-  pretrained_model_path: runs/run-20221206-213844/model_stage0.eqx
+  pretrained_model_path: null
 
   # shape of the auxiliary variables
   auxiliary_shape: [16, 3]

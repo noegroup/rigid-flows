@@ -131,7 +131,7 @@ def main():
 
     backup_config_file(run_dir, args.specs)
 
-    with writer:
+    with writer.as_default():
         train(next(chain), run_dir, specs, base, target, flow)
 
 

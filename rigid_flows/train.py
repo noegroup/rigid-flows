@@ -45,9 +45,6 @@ def flow_force(
     return -jax.grad(negative_log_likelihood)(inp, base, flow).pos
 
 
-# timeseries
-
-
 def force_matching_loss(
     inp: AugmentedData,
     base: DensityModel,

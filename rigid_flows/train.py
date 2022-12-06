@@ -4,6 +4,7 @@ from typing import cast
 import equinox as eqx
 import jax
 import optax
+import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
@@ -20,7 +21,6 @@ from flox.util import key_chain, unpack
 from .data import AugmentedData
 from .density import DensityModel
 from .flow import State
-from .reporting import Reporter
 
 KeyArray = Array | jax.random.PRNGKeyArray
 
@@ -229,7 +229,6 @@ def run_training_stage(
     target: DensityModel,
     flow: Flow,
     specs: TrainingSpecification,
-    reporter: Reporter,
 ):
 
     chain = key_chain(key)
@@ -241,7 +240,7 @@ def run_training_stage(
 
     for num_iter in range(specs.num_iters_per_epoch):
         loss, flow, opt_state = step(next(chain), flow, opt_state)
-        reporter.write_scalar("loss", loss, num_iter)
-        reporter.write_scalar("learning_rate", scheduler(num_iter), num_iter)
+        tf.summary.scalar("loss", loss, num_iter)
+        tf.summary.scalar("learning_rate", scheduler(num_iter), num_iter)
 
     return flow

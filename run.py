@@ -1,24 +1,26 @@
 import argparse
 import datetime
 import logging
-import pprint
 import shutil
+from dataclasses import asdict
 from typing import cast
 
+import equinox as eqx
+import tensorflow as tf  # type: ignore
 from jax_dataclasses import pytree_dataclass
-from rigid_flows.config import from_yaml, to_hparam_dict, to_yaml
+from rigid_flows.config import from_yaml, pretty_json, to_yaml
 from rigid_flows.density import (
     BaseDensity,
     BaseSpecification,
     TargetDensity,
     TargetSpecification,
 )
-from rigid_flows.flow import FlowSpecification, build_flow
-from rigid_flows.reporting import Reporter
+from rigid_flows.flow import FlowSpecification, State, build_flow
 from rigid_flows.system import SystemSpecification
 from rigid_flows.train import TrainingSpecification, run_training_stage
-from tensorboardX import SummaryWriter
 
+from experiments.rigid_flows.rigid_flows.data import AugmentedData
+from flox.flow import Pipe
 from flox.util import key_chain
 
 logger = logging.getLogger("run.example")
@@ -31,6 +33,7 @@ class ModelSpecification:
     flow: FlowSpecification
     base: BaseSpecification
     target: TargetSpecification
+    pretrained_model_path: str | None
 
 
 @pytree_dataclass(frozen=True)
@@ -39,7 +42,7 @@ class ExperimentSpecification:
     model: ModelSpecification
     system: SystemSpecification
     train: tuple[TrainingSpecification]
-    logger_dir: str
+    run_dir: str
 
     @staticmethod
     def load_from_file(path: str) -> "ExperimentSpecification":
@@ -53,15 +56,23 @@ class ExperimentSpecification:
         return result
 
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser()
-    parser.add_argument("--specs", type=str, required=True)
-    args = parser.parse_args()
+def backup_config_file(run_dir, specs_path):
+    shutil.copy(specs_path, f"{run_dir}/config.yaml")
 
-    logger.info(f"Loading specs from {args.specs}.")
-    specs = ExperimentSpecification.load_from_file(args.specs)
 
-    chain = key_chain(specs.seed)
+def setup_tensorboard(specs):
+    logger.info(f"Logging tensorboard logs to {specs.run_dir}.")
+
+    log_path = f'run-{datetime.datetime.now().strftime("%Y%m%d-%H%M%S")}'
+    run_dir = f"{specs.run_dir}/{log_path}"
+
+    writer = tf.summary.create_file_writer(run_dir)
+
+    return writer, run_dir
+
+
+def setup_model(key, specs):
+    chain = key_chain(key)
 
     logger.info(f"Loading target density.")
     target = TargetDensity.from_specs(
@@ -77,28 +88,52 @@ if __name__ == "__main__":
     flow = build_flow(
         next(chain), specs.model.auxiliary_shape, specs.model.flow
     )
-    # logger.info(flow)
-
-    pp = pprint.PrettyPrinter()
-
-    logger.info(f"Logging tensorboard logs to {specs.logger_dir}.")
-
-    now = datetime.datetime.now().strftime("%Y%m%d-%H%M%S")
-    logger_dir = f"{specs.logger_dir}/run-{now}"
-    summary_writer = SummaryWriter(f"{logger_dir}")
-    shutil.copy(args.specs, f"{logger_dir}/config.yaml")
-
-    prefix = ("train",)
-
-    reporter = Reporter(summary_writer, prefix)
-    reporter.write_text("configuration file", args.specs)
-
-    logger.info(f"Starting training.")
-    for stage, train_spec in enumerate(specs.train):
-        reporter = Reporter(summary_writer, prefix + (f"stage_{stage}",))
-        logger.info(f"Training {pp.pprint(train_spec)}")
-        flow = run_training_stage(
-            next(chain), base, target, flow, train_spec, reporter
+    if specs.model.pretrained_model_path is not None:
+        logger.info(
+            f"Loading pre-trained model from {specs.model.pretrained_model_path}."
+        )
+        flow = cast(
+            Pipe[AugmentedData, State],
+            eqx.tree_deserialise_leaves(
+                specs.model.pretrained_model_path, flow
+            ),
         )
 
-    summary_writer.close()
+    return base, target, flow
+
+
+def train(key, run_dir, specs, base, target, flow):
+    chain = key_chain(key)
+    tf.summary.text("run_params", pretty_json(asdict(specs)), step=0)
+    logger.info(f"Starting training.")
+    for stage, train_spec in enumerate(specs.train):
+        with tf.name_scope(f"stage_{stage}"):
+            flow = run_training_stage(
+                next(chain), base, target, flow, train_spec
+            )
+            model_path = f"model_stage{stage}.eqx"
+            eqx.tree_serialise_leaves(f"{run_dir}/{model_path}", flow)
+
+
+def main():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--specs", type=str, required=True)
+    args = parser.parse_args()
+
+    logger.info(f"Loading specs from {args.specs}.")
+    specs = ExperimentSpecification.load_from_file(args.specs)
+
+    chain = key_chain(specs.seed)
+
+    base, target, flow = setup_model(next(chain), specs)
+
+    writer, run_dir = setup_tensorboard(specs)
+
+    backup_config_file(run_dir, args.specs)
+
+    with writer:
+        train(next(chain), run_dir, specs, base, target, flow)
+
+
+if __name__ == "__main__":
+    main()

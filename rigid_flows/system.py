@@ -4,12 +4,12 @@ from functools import partial
 
 import jax
 import numpy as np
-import openmm
-import openmm.app
+import openmm  # type: ignore
+import openmm.app  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from openmm import unit
+from openmm import unit  # type: ignore
 
 from .systems.watermodel import WaterModel
 

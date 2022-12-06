@@ -1,3 +1,4 @@
+import json
 from collections.abc import Iterable, Mapping
 from dataclasses import asdict, is_dataclass
 from inspect import isclass
@@ -6,6 +7,7 @@ from types import GenericAlias, UnionType
 from typing import Any, Mapping, Type
 
 import yaml
+from jax_dataclasses import pytree_dataclass
 
 
 class NoAliasDumper(yaml.SafeDumper):
@@ -35,7 +37,9 @@ def parse(typ, value):
         if isinstance(value, typ):
             return value
         else:
-            return typ(value)
+            if value is not None:
+                return typ(value)
+    raise ValueError(f"Cannot parse {value} to {typ}.")
 
 
 def parse_iterable(value_type, values):
@@ -99,35 +103,10 @@ def to_yaml(obj, stream=None):
     return yaml.dump(asdict(obj), stream, Dumper=NoAliasDumper)
 
 
-def needs_flattening(obj):
-    if isinstance(obj, Iterable) and not isinstance(obj, Mapping):
-        for elem in obj:
-            return needs_flattening(elem)
-    else:
-        return isinstance(obj, dict)
-
-
-def flatten_dict(d, prefix=()):
-    for key, val in d.items():
-        prefix_ = prefix + (key,)
-        if isinstance(val, dict):
-            for k, v in flatten_dict(val, prefix=prefix_):
-                yield (k, v)
-        elif isinstance(val, list | tuple):
-            if needs_flattening(val):
-                for i, v in enumerate(val):
-                    for k, v in flatten_dict(v, prefix_ + (str(i),)):
-                        yield (k, v)
-            else:
-                yield (".".join(prefix_), val)
-        else:
-            yield (".".join(prefix_), val)
-
-
-def to_hparam_dict(obj):
-    assert is_dataclass(type(obj))
-    return dict(flatten_dict(asdict(obj)))
-
-
 def from_yaml(clz: Type, stream):
     return parse(clz, yaml.load(stream, yaml.Loader))
+
+
+def pretty_json(hp):
+    json_hp = json.dumps(hp, indent=2)
+    return "".join("\t" + line for line in json_hp.splitlines(True))

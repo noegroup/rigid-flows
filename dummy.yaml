@@ -1,9 +1,12 @@
 # random seed of the model
 seed: 42
 
-logger_dir: "./logs"
+run_dir: "./runs"
 
 model:
+
+  # set if model is trained with warm start
+  pretrained_model_path: runs/run-20221206-213844/model_stage0.eqx
 
   # shape of the auxiliary variables
   auxiliary_shape: [16, 3]
@@ -49,7 +52,7 @@ model:
 
   # target density
   target:
-    cutoff_threshold:
+    cutoff_threshold: null
 
 
 # system definition

@@ -1,7 +1,5 @@
-import logging
 from collections.abc import Callable
 from functools import partial
-from multiprocessing.sharedctypes import Value
 from typing import Protocol, TypeVar
 
 import jax
@@ -10,7 +8,6 @@ import tensorflow_probability.substrates.jax as tfp  # type: ignore
 from jax import Array
 from jax_dataclasses import pytree_dataclass
 
-from experiments.rigid_flows.rigid_flows.systems.watermodel import WaterModel
 from flox.flow import Transformed
 from flox.util import key_chain
 

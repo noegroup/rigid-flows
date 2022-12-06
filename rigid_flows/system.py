@@ -87,7 +87,7 @@ class OpenMMEnergyModel:
         forces = np.empty_like(pos, dtype=np.float32)
 
         assert box.shape == (3, 3), f"box.shape = {box.shape}"
-        self.simulation.context.setPeriodicBoxVectors(boxb[0], box[1], box[2])
+        self.simulation.context.setPeriodicBoxVectors(box[0], box[1], box[2])
 
         # iterate over batch dimension
         for i in range(len(pos)):

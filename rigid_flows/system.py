@@ -64,15 +64,16 @@ class OpenMMEnergyModel:
         integrator = openmm.LangevinMiddleIntegrator(
             temperature * unit.kelvin, 1 / unit.picosecond, 1 * unit.femtosecond
         )
-        if isinstance(
-            model.system.getForces()[-1],
-            (
-                openmm.MonteCarloBarostat,
-                openmm.MonteCarloAnisotropicBarostat,
-                openmm.MonteCarloFlexibleBarostat,
-            ),
-        ):
-            model.system.getForces()[-1].setDefaultTemperature(temperature)
+        for force in model.system.getForces():
+            if isinstance(
+                force,
+                (
+                    openmm.MonteCarloBarostat,
+                    openmm.MonteCarloAnisotropicBarostat,
+                    openmm.MonteCarloFlexibleBarostat,
+                ),
+            ):
+                force.setDefaultTemperature(temperature)
         self.simulation = openmm.app.Simulation(
             model.topology, model.system, integrator
         )
@@ -87,7 +88,7 @@ class OpenMMEnergyModel:
         forces = np.empty_like(pos, dtype=np.float32)
 
         assert box.shape == (3, 3), f"box.shape = {box.shape}"
-        self.simulation.context.setPeriodicBoxVectors(box[0], box[1], box[2])
+        self.simulation.context.setPeriodicBoxVectors(*box)
 
         # iterate over batch dimension
         for i in range(len(pos)):
@@ -97,6 +98,7 @@ class OpenMMEnergyModel:
 
             try:
                 self.simulation.context.setPositions(pos[i])
+                # self.simulation.context.computeVirtualSites()
 
                 state = self.simulation.context.getState(
                     getEnergy=True, getForces=True

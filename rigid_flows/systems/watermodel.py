@@ -129,6 +129,7 @@ class WaterModel:
 
         self.n_waters = n_waters
         self.n_sites = n_sites
+        self.n_atoms = n_waters * n_sites
         self.water_type = water_type
         self.nonbondedCutoff = nonbondedCutoff
 
@@ -264,6 +265,75 @@ class WaterModel:
             init_info = json.load(f)
         return WaterModel(**init_info)
 
+    def plot_2Dview(self, pos=None, box=None, toPBC=False):
+        if pos is None:
+            pos = self._positions
+        if box is None:
+            box = self._box
+
+        if len(pos.squeeze().shape) == 2:
+            marker = 'o'
+            alpha = 1
+        elif len(pos.squeeze().shape) == 3:
+            marker = '.'
+            alpha = 0.05
+        else:
+            raise ValueError('pos should be of shape (nframes, natoms, 3)')
+        if pos.shape[-2] != self.n_atoms or pos.shape[-1] != 3:
+            raise ValueError('pos should be of shape (nframes, natoms, 3)')
+
+        av_box = box.mean(axis=0) if len(box.shape) == 3 else box
+        if av_box.shape != (3, 3):
+            raise ValueError('box should be a 3x3 matrix')
+
+        if toPBC:
+            if self.is_box_orthorombic:
+                mypos = (pos / np.diagonal(av_box) % 1) * np.diagonal(av_box)
+            else:
+                raise NotImplementedError('only available for fixed orthorombic box')
+        else:
+            mypos = pos
+
+        plt.figure(figsize=(15, 4))
+        for i in range(3):
+            ii = (i + 1) % 3
+            iii = (i + 2) % 3
+            plt.subplot(1, 3, 1+i)
+
+            #draw particles
+            plt.scatter(mypos[..., 1::self.n_sites, i], mypos[..., 1::self.n_sites, ii], marker=marker, alpha=alpha, c='gray')
+            plt.scatter(mypos[..., 2::self.n_sites, i], mypos[..., 2::self.n_sites, ii], marker=marker, alpha=alpha, c='gray')
+            plt.scatter(mypos[..., ::self.n_sites, i], mypos[..., ::self.n_sites, ii], marker=marker, alpha=alpha, c='r')
+
+            #draw box
+            coord = [
+                [0, 0],
+                [av_box[i,i], av_box[i,ii]],
+                [av_box[i,i] + av_box[ii,i], av_box[i,ii] + av_box[ii,ii]],
+                [av_box[ii,i], av_box[ii,ii]],
+                [0, 0]
+            ]
+            xs, ys = zip(*coord)
+            plt.plot(xs, ys, 'k:')
+            if not self.is_box_orthorombic:
+                coord2 = [
+                    coord[1],
+                    [coord[1][0] + av_box[iii,i], coord[1][1] + av_box[iii,ii]],
+                    [coord[2][0] + av_box[iii,i], coord[2][1] + av_box[iii,ii]],
+                    [coord[3][0] + av_box[iii,i], coord[3][1] + av_box[iii,ii]],
+                    coord[3],
+                ]
+                xs, ys = zip(*coord2)
+                plt.plot(xs, ys, 'k:')
+                coord = [coord[2], coord2[2]]
+                xs, ys = zip(*coord)
+                plt.plot(xs, ys, 'k:')
+
+            plt.xlabel(f'x{i} [nm]')
+            plt.ylabel(f'x{ii} [nm]')
+            plt.gca().set_aspect(1)
+        plt.show()
+
     def get_view(self, pos=None, box=None):
         """visualize in notebook with nglview"""
         if nv is None:
@@ -298,65 +368,3 @@ def plot_energy(ene):
 
     plt.show()
 
-
-def plot_2Dview(pos, box, n_sites=4, alpha=0.05):
-    av_box = box.mean(axis=0) if len(box.shape) == 3 else box
-    non_orthorombic = np.count_nonzero(av_box - np.diag(np.diagonal(av_box)))
-
-    plt.figure(figsize=(15, 4))
-    for i in range(3):
-        ii = (i + 1) % 3
-        iii = (i + 2) % 3
-        plt.subplot(1, 3, 1 + i)
-
-        # draw particles
-        plt.plot(
-            pos[..., 1::n_sites, i],
-            pos[..., 1::n_sites, ii],
-            ".",
-            alpha=alpha,
-            c="gray",
-        )
-        plt.plot(
-            pos[..., 2::n_sites, i],
-            pos[..., 2::n_sites, ii],
-            ".",
-            alpha=alpha,
-            c="gray",
-        )
-        plt.plot(
-            pos[..., ::n_sites, i],
-            pos[..., ::n_sites, ii],
-            ".",
-            alpha=alpha,
-            c="r",
-        )
-
-        # draw box
-        coord = [
-            [0, 0],
-            [av_box[i, i], av_box[i, ii]],
-            [av_box[i, i] + av_box[ii, i], av_box[i, ii] + av_box[ii, ii]],
-            [av_box[ii, i], av_box[ii, ii]],
-            [0, 0],
-        ]
-        xs, ys = zip(*coord)
-        plt.plot(xs, ys, "k:")
-        if non_orthorombic:
-            coord2 = [
-                coord[1],
-                [coord[1][0] + av_box[iii, i], coord[1][1] + av_box[iii, ii]],
-                [coord[2][0] + av_box[iii, i], coord[2][1] + av_box[iii, ii]],
-                [coord[3][0] + av_box[iii, i], coord[3][1] + av_box[iii, ii]],
-                coord[3],
-            ]
-            xs, ys = zip(*coord2)
-            plt.plot(xs, ys, "k:")
-            coord = [coord[2], coord2[2]]
-            xs, ys = zip(*coord)
-            plt.plot(xs, ys, "k:")
-
-        plt.xlabel(f"x{i} [nm]")
-        plt.ylabel(f"x{ii} [nm]")
-        plt.gca().set_aspect(1)
-    plt.show()

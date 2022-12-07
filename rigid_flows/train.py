@@ -1,8 +1,10 @@
 from functools import partial
+from itertools import accumulate
 from typing import cast
 
 import equinox as eqx
 import jax
+import numpy as np
 import optax
 import tensorflow as tf  # type: ignore
 from jax import Array
@@ -146,7 +148,7 @@ def get_scheduler(specs: TrainingSpecification):
         jnp.linspace(
             jnp.log10(specs.init_learning_rate),
             jnp.log10(specs.target_learning_rate),
-            specs.num_epochs,
+            specs.num_epochs + 1,
         ),
     )
     alphas = learning_rates[1:] / learning_rates[:-1]
@@ -156,9 +158,9 @@ def get_scheduler(specs: TrainingSpecification):
             optax.cosine_decay_schedule(
                 learning_rate, specs.num_iters_per_epoch, alpha=alpha
             )
-            for learning_rate, alpha in zip(learning_rates, alphas)
+            for learning_rate, alpha in zip(learning_rates, alphas, strict=True)
         ),
-        (specs.num_iters_per_epoch,) * (specs.num_epochs - 1),
+        tuple(accumulate((specs.num_iters_per_epoch,) * (specs.num_epochs))),
     )
     return scheduler
 

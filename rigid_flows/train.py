@@ -8,7 +8,12 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
+from optax import (
+    GradientTransformation,
+    OptState,
+    huber_loss,
+    safe_root_mean_squares,
+)
 
 from flox.flow import Transform
 from flox.util import key_chain, unpack
@@ -17,6 +22,7 @@ from .data import AugmentedData
 from .density import BaseDensity, DensityModel, TargetDensity
 from .flow import State
 from .reporting import Reporter
+from .utils import jit_and_cleanup_cache
 
 KeyArray = Array | jax.random.PRNGKeyArray
 
@@ -229,20 +235,20 @@ def run_training_stage(
     scheduler = get_scheduler(training_specs)
     trainer = Trainer.from_specs(base, target, training_specs)
 
-    opt_state = eqx.filter_jit(trainer.init)(next(chain), flow)
-    step = eqx.filter_jit(trainer.step)
+    opt_state = trainer.init(next(chain), flow)
 
-    tot_iter = 0
-    for num_epoch in range(training_specs.num_epochs):
-        epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
-        for num_iter in range(training_specs.num_iters_per_epoch):
-            loss, flow, opt_state = step(next(chain), flow, opt_state)
-            tf.summary.scalar(f"{reporter.scope}/loss", loss, tot_iter)
-            tf.summary.scalar(
-                f"{reporter.scope}/learning_rate",
-                scheduler(tot_iter),
-                tot_iter,
-            )
-            tot_iter += 1
-        epoch_reporter.report_model(next(chain), flow, tot_iter)
+    with jit_and_cleanup_cache(trainer.step) as step:
+        tot_iter = 0
+        for num_epoch in range(training_specs.num_epochs):
+            epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
+            for num_iter in range(training_specs.num_iters_per_epoch):
+                loss, flow, opt_state = step(next(chain), flow, opt_state)
+                tf.summary.scalar(f"{reporter.scope}/loss", loss, tot_iter)
+                tf.summary.scalar(
+                    f"{reporter.scope}/learning_rate",
+                    scheduler(tot_iter),
+                    tot_iter,
+                )
+                tot_iter += 1
+            epoch_reporter.report_model(next(chain), flow, tot_iter)
     return flow

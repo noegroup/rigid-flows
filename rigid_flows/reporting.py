@@ -1,3 +1,4 @@
+import contextlib
 import io
 import itertools as it
 import logging
@@ -27,6 +28,7 @@ from .data import AugmentedData
 from .density import BaseDensity, KeyArray, TargetDensity
 from .flow import InitialTransform, State
 from .system import OpenMMEnergyModel, SimulationBox
+from .utils import jit_and_cleanup_cache
 
 logger = logging.getLogger("rigid-flows")
 
@@ -272,9 +274,6 @@ T = TypeVar("T")
 def batched_sampler(
     sample: Sampler[T], num_samples_tot: int, num_samples_per_batch: int
 ) -> Callable[[KeyArray], Transformed[T] | None]:
-
-    sample_jitted_vmapped: Sampler[T] = jax.jit(jax.vmap(sample))
-
     def accum(accum: Transformed[T], new: Transformed[T]) -> Transformed[T]:
         return jax.tree_map(lambda a, b: jnp.concatenate([a, b]), accum, new)
 
@@ -284,7 +283,7 @@ def batched_sampler(
         num_left = num_samples_tot
         while num_left > 0:
             batch_size = min(num_samples_per_batch, num_left)
-            batch = sample_jitted_vmapped(
+            batch = jax.vmap(sample)(
                 jax.random.split(
                     next(chain),
                     batch_size,
@@ -418,27 +417,36 @@ def report_model(
     logger.info("preparing report")
 
     logger.info("sampling from data")
-    data_samples = batched_sampler(
-        partial(sample_from_target, target=target),
-        specs.num_samples,
-        specs.num_samples_per_batch,
-    )(next(chain))
+    with jit_and_cleanup_cache(
+        batched_sampler(
+            partial(sample_from_target, target=target),
+            specs.num_samples,
+            specs.num_samples_per_batch,
+        )
+    ) as sample:
+        data_samples = sample(next(chain))
     assert data_samples is not None
 
     logger.info("sampling from prior")
-    prior_samples = batched_sampler(
-        partial(sample_from_base, base=base),
-        specs.num_samples,
-        specs.num_samples_per_batch,
-    )(next(chain))
+    with jit_and_cleanup_cache(
+        batched_sampler(
+            partial(sample_from_base, base=base),
+            specs.num_samples,
+            specs.num_samples_per_batch,
+        )
+    ) as sample:
+        prior_samples = sample(next(chain))
     assert prior_samples is not None
 
     logger.info("sampling from model")
-    model_samples = batched_sampler(
-        partial(sample_from_model, base=base, flow=flow),
-        specs.num_samples,
-        specs.num_samples_per_batch,
-    )(next(chain))
+    with jit_and_cleanup_cache(
+        batched_sampler(
+            partial(sample_from_model, base=base, flow=flow),
+            specs.num_samples,
+            specs.num_samples_per_batch,
+        )
+    ) as sample:
+        model_samples = sample(next(chain))
     assert model_samples is not None
 
     stats = compute_sampling_statistics(model_samples, target)

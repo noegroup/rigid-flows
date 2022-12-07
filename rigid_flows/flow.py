@@ -97,23 +97,25 @@ class State:
 
     rot: Array
     pos: Array
-    ics: tuple[Array, ...]
+    ics: InternalCoordinates
     aux: Array
     box: SimulationBox
 
 
 def affine_quat_fwd(q, A):
     A = jnp.eye(4) + A.reshape(4, 4)
-    q_ = geom.unit(A @ q)
+    q_ = A @ q
     ldj = jnp.linalg.slogdet(A)[1] - 4 * jnp.log(geom.norm(q_))
+    q_ = geom.unit(q_)
     return q_, ldj
 
 
 def affine_quat_inv(q, A):
     A = jnp.eye(4) + A.reshape(4, 4)
     A = jnp.linalg.inv(A)
-    q_ = geom.unit(A @ q)
+    q_ = A @ q
     ldj = jnp.linalg.slogdet(A)[1] - 4 * jnp.log(geom.norm(q_))
+    q_ = geom.unit(q_)
     return q_, ldj
 
 

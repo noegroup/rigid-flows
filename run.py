@@ -13,17 +13,21 @@ from rigid_flows.data import AugmentedData
 from rigid_flows.density import (
     BaseDensity,
     BaseSpecification,
+    KeyArray,
     TargetDensity,
     TargetSpecification,
 )
 from rigid_flows.flow import FlowSpecification, State, build_flow
+from rigid_flows.reporting import Reporter, ReportingSpecifications
 from rigid_flows.system import SystemSpecification
 from rigid_flows.train import TrainingSpecification, run_training_stage
 
+from flox._src.flow.api import Transform
 from flox.flow import Pipe
 from flox.util import key_chain
 
-logger = logging.getLogger("run.example")
+logger = logging.getLogger("rigid-flows")
+
 logger.setLevel(logging.INFO)
 
 
@@ -42,6 +46,7 @@ class ExperimentSpecification:
     model: ModelSpecification
     system: SystemSpecification
     train: tuple[TrainingSpecification]
+    reporting: ReportingSpecifications
     run_dir: str
 
     @staticmethod
@@ -102,17 +107,29 @@ def setup_model(key, specs):
     return base, target, flow
 
 
-def train(key, run_dir, specs, base, target, flow):
+def train(
+    key: KeyArray,
+    run_dir: str,
+    specs: ExperimentSpecification,
+    base: BaseDensity,
+    target: TargetDensity,
+    flow: Transform[AugmentedData, State],
+) -> Transform[AugmentedData, State]:
     chain = key_chain(key)
     tf.summary.text("run_params", pretty_json(asdict(specs)), step=0)
     logger.info(f"Starting training.")
+    reporter = Reporter(base, target, run_dir, specs.reporting, scope=None)
+    reporter.with_scope(f"initial").report_model(next(chain), flow, 0)
     for stage, train_spec in enumerate(specs.train):
-        with tf.name_scope(f"stage_{stage}"):
-            flow = run_training_stage(
-                next(chain), base, target, flow, train_spec
-            )
-            model_path = f"model_stage{stage}.eqx"
-            eqx.tree_serialise_leaves(f"{run_dir}/{model_path}", flow)
+        flow = run_training_stage(
+            next(chain),
+            base,
+            target,
+            flow,
+            train_spec,
+            reporter.with_scope(f"traing_stage_{stage}"),
+        )
+    return flow
 
 
 def main():
@@ -132,7 +149,7 @@ def main():
     backup_config_file(run_dir, args.specs)
 
     with writer.as_default():
-        train(next(chain), run_dir, specs, base, target, flow)
+        flow = train(next(chain), run_dir, specs, base, target, flow)
 
 
 if __name__ == "__main__":

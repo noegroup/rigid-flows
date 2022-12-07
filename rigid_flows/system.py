@@ -42,6 +42,7 @@ class SystemSpecification:
     temperature: int
     ice_type: str
     recompute_forces: bool
+    fixed_box: bool
 
     def __str__(self) -> str:
         return f"ice{self.ice_type}_T{self.temperature}_N{self.num_molecules}"
@@ -78,22 +79,31 @@ class OpenMMEnergyModel:
         )
         self.error_handling = error_handling
 
+    def set_box(self, box: SimulationBox):
+        box_vectors = np.diag(np.array(box.size))
+        self.simulation.context.setPeriodicBoxVectors(
+            box_vectors[0], box_vectors[1], box_vectors[2]
+        )
+
     def compute_energies_and_forces(
         self,
         pos: np.ndarray,
-        box: np.ndarray,
+        box: np.ndarray | None,
     ):
         energies = np.empty(pos.shape[0], dtype=np.float32)
         forces = np.empty_like(pos, dtype=np.float32)
 
-        assert box.shape == (3, 3), f"box.shape = {box.shape}"
-        self.simulation.context.setPeriodicBoxVectors(box[0], box[1], box[2])
+        if box is not None:
+            assert box.shape == (3, 3), f"box.shape = {box.shape}"
+            self.simulation.context.setPeriodicBoxVectors(
+                box[0], box[1], box[2]
+            )
 
         # iterate over batch dimension
         for i in range(len(pos)):
 
-            energy = jnp.nan * energies[0]
-            force = jnp.nan * forces[0]
+            energy = jnp.nan * energies[i]
+            force = jnp.nan * forces[i]
 
             try:
                 self.simulation.context.setPositions(pos[i])
@@ -130,10 +140,13 @@ class OpenMMEnergyModel:
 
 
 def wrap_openmm_model(model: OpenMMEnergyModel):
-    def compute_energy_and_forces(pos: Array, box: Array, has_batch_dim: bool):
+    def compute_energy_and_forces(
+        pos: Array, box: Array | None, has_batch_dim: bool
+    ):
 
-        assert box.shape == (3,)
-        box = jnp.diag(box)
+        if box is not None:
+            assert box.shape == (3,)
+            box = jnp.diag(box)
 
         if not has_batch_dim:
             assert pos.shape == (model.model.n_waters, 4, 3)
@@ -160,7 +173,7 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
 
         return energies, forces
 
-    def eval_fwd(pos: Array, box: Array, has_batch_dim: bool):
+    def eval_fwd(pos: Array, box: Array | None, has_batch_dim: bool):
         energy, force = compute_energy_and_forces(pos, box, has_batch_dim)
         return energy, (force, box)
 
@@ -169,7 +182,7 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
         return -g * force, jnp.zeros_like(box)
 
     @partial(jax.custom_vjp, nondiff_argnums=(1, 2))
-    def eval(pos: Array, box: Array, has_batch_dim: bool):
+    def eval(pos: Array, box: Array | None, has_batch_dim: bool):
         return eval_fwd(pos, box, has_batch_dim)[0]
 
     eval.defvjp(eval_fwd, eval_bwd)

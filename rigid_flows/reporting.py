@@ -1,13 +1,10 @@
-import contextlib
 import io
 import itertools as it
 import logging
-import os
-import shutil
 from dataclasses import asdict
 from functools import partial
 from pathlib import Path
-from typing import Any, Callable, TypeVar, cast
+from typing import Any, Callable, TypeVar
 
 import equinox as eqx
 import jax

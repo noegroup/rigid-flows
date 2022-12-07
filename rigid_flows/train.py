@@ -86,7 +86,7 @@ def per_sample_loss(
     weight_nll: float,
     weight_fm: float,
     weight_fe: float,
-    fm_aggregation: str,
+    fm_aggregation: str | None,
 ):
     loss = 0.0
     chain = key_chain(key)
@@ -94,6 +94,7 @@ def per_sample_loss(
         inp, _ = unpack(target.sample(next(chain)))
         loss += weight_nll * negative_log_likelihood(inp, base, flow)
     if weight_fm > 0:
+        assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
         loss += weight_fm * force_matching_loss(inp, base, flow, fm_aggregation)
     if weight_fe > 0:
@@ -110,7 +111,7 @@ def batch_loss(
     weight_nll: float,
     weight_fm: float,
     weight_fe: float,
-    fm_aggregation: str,
+    fm_aggregation: str | None,
     num_samples: int,
 ):
     return jnp.mean(
@@ -138,7 +139,7 @@ class TrainingSpecification:
     weight_nll: float
     weight_fm: float
     weight_fe: float
-    fm_aggregation: str
+    fm_aggregation: str | None
     num_samples: int
 
 
@@ -173,7 +174,7 @@ class Trainer:
     weight_nll: float
     weight_fm: float
     weight_fe: float
-    fm_aggregation: str
+    fm_aggregation: str | None
     num_samples: int
 
     def init(

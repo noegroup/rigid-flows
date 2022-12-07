@@ -201,7 +201,7 @@ def plot_energy_histogram(
     energies_data: np.ndarray,
     energies_model: np.ndarray,
     weights: np.ndarray | None = None,
-    num_stds=4.0,
+    num_stds=15.0,
     num_bins=100,
 ):
     assert len(energies_data.shape) == 1

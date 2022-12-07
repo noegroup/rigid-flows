@@ -12,7 +12,7 @@ from flox.flow import Transformed
 from flox.util import key_chain
 
 from .data import AugmentedData, Data
-from .flow import State
+from .flow import InternalCoordinates, State
 from .system import (
     OpenMMEnergyModel,
     SimulationBox,
@@ -96,11 +96,7 @@ class BaseDensity(DensityModel[State]):
             jax.random.normal(next(chain), shape=(rot.shape[0], 1))
         )
         pos = self.pos_model.sample(seed=next(chain))
-        ics = (
-            jnp.full(shape=(pos.shape[0],), fill_value=0.09572),
-            jnp.full(shape=(pos.shape[0],), fill_value=0.09572),
-            jnp.full(shape=(pos.shape[0],), fill_value=1.824218),
-        )
+        ics = InternalCoordinates()
         aux = self.aux_model.sample(seed=next(chain))
         state = State(rot, pos, ics, aux, self.box)
         log_prob = self.potential(state)
@@ -180,6 +176,10 @@ class TargetDensity(DensityModel[AugmentedData]):
         self.data = data
         self.cutoff = cutoff_threshold
 
+        # set simulation box
+        if self.sys_specs.fixed_box:
+            self.model.set_box(self.box)
+
     @property
     def box(self) -> SimulationBox:
         if self.data is None:
@@ -197,17 +197,25 @@ class TargetDensity(DensityModel[AugmentedData]):
 
         """
         aux_prob = self.aux_model.log_prob(inp.aux).sum()
+
+        if self.sys_specs.fixed_box:
+            box = None
+        else:
+            box = inp.box.size
+
         energy = partial(
             wrap_openmm_model(self.model),
-            box=inp.box.size,
+            box=box,
             has_batch_dim=False,
         )
+
         if self.cutoff is not None:
             if self.data is None:
                 raise ValueError("cutoff != None requires data.")
             else:
                 energy = cutoff_potential(energy, self.data.pos[0], self.cutoff)
-        pot = energy(inp.pos, inp.box.size)
+
+        pot = energy(inp.pos)
         return -aux_prob + pot
 
     def sample(self, key: KeyArray) -> Transformed[AugmentedData]:
@@ -234,6 +242,7 @@ class TargetDensity(DensityModel[AugmentedData]):
             )
             box = SimulationBox(self.data.box[idx])
             pos = self.data.pos[idx].reshape(-1, 4, 3)
+            energy = self.data.energy[idx]
             if self.data.force is not None:
                 force = self.data.force[idx]
             else:
@@ -245,7 +254,7 @@ class TargetDensity(DensityModel[AugmentedData]):
                 )
             )
             return Transformed(
-                AugmentedData(pos, aux, sign, box, force), jnp.zeros(())
+                AugmentedData(pos, aux, sign, box, force), energy
             )
 
     @staticmethod

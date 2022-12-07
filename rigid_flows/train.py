@@ -1,8 +1,10 @@
 from functools import partial
+from itertools import accumulate
 from typing import cast
 
 import equinox as eqx
 import jax
+import numpy as np
 import optax
 import tensorflow as tf  # type: ignore
 from jax import Array
@@ -19,8 +21,10 @@ from flox.flow import Transform
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
-from .density import DensityModel
+from .density import BaseDensity, DensityModel, TargetDensity
 from .flow import State
+from .reporting import Reporter
+from .utils import jit_and_cleanup_cache
 
 KeyArray = Array | jax.random.PRNGKeyArray
 
@@ -34,7 +38,7 @@ def negative_log_likelihood(
     flow: Transform[AugmentedData, State],
 ):
     out, ldj = unpack(flow.forward(inp))
-    return base.potential(out) - ldj
+    return jnp.sum(base.potential(out) - ldj)
 
 
 def flow_force(
@@ -71,7 +75,7 @@ def free_energy_loss(
     flow: Transform[AugmentedData, State],
 ):
     out, ldj = unpack(flow.inverse(inp))
-    return target.potential(out) - ldj
+    return jnp.sum(target.potential(out) - ldj)
 
 
 def per_sample_loss(
@@ -82,7 +86,7 @@ def per_sample_loss(
     weight_nll: float,
     weight_fm: float,
     weight_fe: float,
-    fm_aggregation: str,
+    fm_aggregation: str | None,
 ):
     loss = 0.0
     chain = key_chain(key)
@@ -90,6 +94,7 @@ def per_sample_loss(
         inp, _ = unpack(target.sample(next(chain)))
         loss += weight_nll * negative_log_likelihood(inp, base, flow)
     if weight_fm > 0:
+        assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
         loss += weight_fm * force_matching_loss(inp, base, flow, fm_aggregation)
     if weight_fe > 0:
@@ -106,7 +111,7 @@ def batch_loss(
     weight_nll: float,
     weight_fm: float,
     weight_fe: float,
-    fm_aggregation: str,
+    fm_aggregation: str | None,
     num_samples: int,
 ):
     return jnp.mean(
@@ -134,7 +139,7 @@ class TrainingSpecification:
     weight_nll: float
     weight_fm: float
     weight_fe: float
-    fm_aggregation: str
+    fm_aggregation: str | None
     num_samples: int
 
 
@@ -144,7 +149,7 @@ def get_scheduler(specs: TrainingSpecification):
         jnp.linspace(
             jnp.log10(specs.init_learning_rate),
             jnp.log10(specs.target_learning_rate),
-            specs.num_epochs,
+            specs.num_epochs + 1,
         ),
     )
     alphas = learning_rates[1:] / learning_rates[:-1]
@@ -154,9 +159,9 @@ def get_scheduler(specs: TrainingSpecification):
             optax.cosine_decay_schedule(
                 learning_rate, specs.num_iters_per_epoch, alpha=alpha
             )
-            for learning_rate, alpha in zip(learning_rates, alphas)
+            for learning_rate, alpha in zip(learning_rates, alphas, strict=True)
         ),
-        (specs.num_iters_per_epoch,) * (specs.num_epochs - 1),
+        tuple(accumulate((specs.num_iters_per_epoch,) * (specs.num_epochs))),
     )
     return scheduler
 
@@ -169,7 +174,7 @@ class Trainer:
     weight_nll: float
     weight_fm: float
     weight_fe: float
-    fm_aggregation: str
+    fm_aggregation: str | None
     num_samples: int
 
     def init(
@@ -222,22 +227,31 @@ class Trainer:
 
 def run_training_stage(
     key: KeyArray,
-    base: DensityModel,
-    target: DensityModel,
+    base: BaseDensity,
+    target: TargetDensity,
     flow: Flow,
-    specs: TrainingSpecification,
+    training_specs: TrainingSpecification,
+    reporter: Reporter,
 ):
 
     chain = key_chain(key)
-    scheduler = get_scheduler(specs)
-    trainer = Trainer.from_specs(base, target, specs)
+    scheduler = get_scheduler(training_specs)
+    trainer = Trainer.from_specs(base, target, training_specs)
 
-    opt_state = eqx.filter_jit(trainer.init)(next(chain), flow)
-    step = eqx.filter_jit(trainer.step)
+    opt_state = trainer.init(next(chain), flow)
 
-    for num_iter in range(specs.num_iters_per_epoch):
-        loss, flow, opt_state = step(next(chain), flow, opt_state)
-        tf.summary.scalar("loss", loss, num_iter)
-        tf.summary.scalar("learning_rate", scheduler(num_iter), num_iter)
-
+    with jit_and_cleanup_cache(trainer.step) as step:
+        tot_iter = 0
+        for num_epoch in range(training_specs.num_epochs):
+            epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
+            for num_iter in range(training_specs.num_iters_per_epoch):
+                loss, flow, opt_state = step(next(chain), flow, opt_state)
+                tf.summary.scalar(f"{reporter.scope}/loss", loss, tot_iter)
+                tf.summary.scalar(
+                    f"{reporter.scope}/learning_rate",
+                    scheduler(tot_iter),
+                    tot_iter,
+                )
+                tot_iter += 1
+            epoch_reporter.report_model(next(chain), flow, tot_iter)
     return flow

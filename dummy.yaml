@@ -3,6 +3,17 @@ seed: 42
 
 run_dir: "./runs"
 
+reporting:
+  num_samples: 1000
+  num_samples_per_batch: 1000
+  plot_quaternions: [4, 7]
+  plot_oxygens: true
+  plot_energy_histograms: true
+  report_ess: true
+  save_model: true
+  save_samples: true
+  save_statistics: true
+
 model:
 
   # set if model is trained with warm start
@@ -62,6 +73,7 @@ system:
   temperature: 250
   ice_type: Ih
   recompute_forces: false
+  fixed_box: true
 
 
 # training definition
@@ -69,7 +81,7 @@ train:
 
   # first stage: only likelihood
   - num_epochs: 2
-    num_iters_per_epoch: 1
+    num_iters_per_epoch: 1000
     init_learning_rate: 0.001
     target_learning_rate: 0.000001
     weight_nll: 1.0
@@ -80,7 +92,7 @@ train:
 
   # first stage: only likelihood
   - num_epochs: 2
-    num_iters_per_epoch: 1
+    num_iters_per_epoch: 1000
     init_learning_rate: 0.001
     target_learning_rate: 0.000001
     weight_nll: 1.0

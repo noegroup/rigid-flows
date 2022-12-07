@@ -8,7 +8,7 @@ from jax_dataclasses import pytree_dataclass
 
 from .system import OpenMMEnergyModel, SimulationBox, SystemSpecification
 
-logger = logging.getLogger("run.example")
+logger = logging.getLogger("rigid-flows")
 
 
 @pytree_dataclass(frozen=True)

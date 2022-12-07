@@ -127,7 +127,7 @@ def train(
             target,
             flow,
             train_spec,
-            reporter.with_scope(f"traing_stage_{stage}"),
+            reporter.with_scope(f"training_stage_{stage}"),
         )
     return flow
 

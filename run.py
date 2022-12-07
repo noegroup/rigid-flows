@@ -133,6 +133,9 @@ def train(
 
 
 def main():
+
+    tf.config.experimental.set_visible_devices([], "GPU")
+
     parser = argparse.ArgumentParser()
     parser.add_argument("--specs", type=str, required=True)
     args = parser.parse_args()

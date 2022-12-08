@@ -531,6 +531,13 @@ def report_model(
     if specs.report_ess:
         logger.info(f"reporting ESS = {stats.ess}")
         tf.summary.scalar(f"/metrics/ess", stats.ess, num_iter)
+        log_weights = jnp.log(stats.weights)
+        log_weights = log_weights[
+            (~jnp.isnan(log_weights)) & (~jnp.isinf(log_weights))
+        ]
+        tf.summary.histogram(
+            "/metrics/model_energies/data", log_weights, step=num_iter
+        )
 
     # report NLL
     if specs.report_likelihood:
@@ -541,13 +548,21 @@ def report_model(
                 specs.num_samples_per_batch,
             )
         ) as eval_likelihood:
-            data_likelihood = jnp.mean(eval_likelihood(data_samples))
-            model_likelihood = jnp.mean(eval_likelihood(model_samples))
+            data_likelihood = eval_likelihood(data_samples)
+            model_likelihood = eval_likelihood(model_samples)
             tf.summary.scalar(
-                f"/metrics/likelihood/data", data_likelihood, num_iter
+                f"/metrics/likelihood/data", jnp.mean(data_likelihood), num_iter
             )
             tf.summary.scalar(
-                f"/metrics/likelihood/model", model_likelihood, num_iter
+                f"/metrics/likelihood/model",
+                jnp.mean(model_likelihood),
+                num_iter,
+            )
+            tf.summary.histogram(
+                "/metrics/model_energies/data", data_likelihood, step=num_iter
+            )
+            tf.summary.histogram(
+                "metrics/model_energies/model", model_likelihood, step=num_iter
             )
 
     # plot energy histograms
@@ -563,6 +578,16 @@ def report_model(
             stats.omm_energies,
             stats.weights,
         )
+        tf.summary.histogram(
+            f"{scope}/histograms/energies/open_mm/data",
+            omm_energies,
+            step=num_iter,
+        )
+        tf.summary.histogram(
+            f"{scope}/histograms/energies/open_mm/model",
+            stats.omm_energies,
+            step=num_iter,
+        )
         write_figure_to_tensorboard(
             f"{scope}/plots/energies/open_mm", fig, num_iter
         )
@@ -573,6 +598,16 @@ def report_model(
             stats.omm_energies + stats.aux_energies,
             stats.weights,
         )
+        tf.summary.histogram(
+            f"{scope}/histograms/energies/open_mm+aux/data",
+            omm_energies + aux_energies,
+            step=num_iter,
+        )
+        tf.summary.histogram(
+            f"{scope}/histograms/energies/open_mm+aux/model",
+            stats.omm_energies + stats.aux_energies,
+            step=num_iter,
+        )
         write_figure_to_tensorboard(
             f"{scope}/plots/energies/total", fig, num_iter
         )
@@ -582,6 +617,14 @@ def report_model(
             aux_energies,
             stats.aux_energies,
             stats.weights,
+        )
+        tf.summary.histogram(
+            f"{scope}/histograms/energies/aux/data", aux_energies, step=num_iter
+        )
+        tf.summary.histogram(
+            f"{scope}/histograms/energies/aux/model",
+            stats.aux_energies,
+            step=num_iter,
         )
         write_figure_to_tensorboard(
             f"{scope}/plots/energies/auxiliary", fig, num_iter

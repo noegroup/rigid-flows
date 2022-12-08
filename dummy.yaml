@@ -10,6 +10,7 @@ reporting:
   plot_oxygens: true
   plot_energy_histograms: true
   report_ess: true
+  report_likelihood: true
   save_model: true
   save_samples: true
   save_statistics: true

@@ -10,12 +10,8 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import (
-    GradientTransformation,
-    OptState,
-    huber_loss,
-    safe_root_mean_squares,
-)
+from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
+from tqdm import tqdm
 
 from flox.flow import Transform
 from flox.util import key_chain, unpack
@@ -244,7 +240,11 @@ def run_training_stage(
         tot_iter = 0
         for num_epoch in range(training_specs.num_epochs):
             epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
-            for num_iter in range(training_specs.num_iters_per_epoch):
+            pbar = tqdm(
+                range(training_specs.num_iters_per_epoch),
+                desc=f"Epoch: {num_epoch}"
+            )
+            for num_iter in pbar:
                 loss, flow, opt_state = step(next(chain), flow, opt_state)
                 tf.summary.scalar(f"{reporter.scope}/loss", loss, tot_iter)
                 tf.summary.scalar(

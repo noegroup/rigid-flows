@@ -101,8 +101,8 @@ class OpenMMEnergyModel:
         # iterate over batch dimension
         for i in range(len(pos)):
 
-            energy = jnp.nan * energies[i]
-            force = jnp.nan * forces[i]
+            energy = jnp.full_like(energies[i], jnp.nan)
+            force = jnp.full_like(forces[i], jnp.nan)
 
             try:
                 self.simulation.context.setPositions(pos[i])

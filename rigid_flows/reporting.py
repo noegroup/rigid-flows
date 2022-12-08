@@ -20,12 +20,13 @@ from matplotlib.patches import Patch
 from flox._src.flow.api import Inverted, Transform, Transformed, bind
 from flox._src.flow.sampling import Sampler
 from flox._src.util.jax import key_chain
+from flox._src.util.misc import unpack
 
 from .data import AugmentedData
 from .density import BaseDensity, KeyArray, TargetDensity
 from .flow import InitialTransform, State
 from .system import OpenMMEnergyModel, SimulationBox
-from .utils import jit_and_cleanup_cache
+from .utils import jit_and_cleanup_cache, scanned_vmap
 
 logger = logging.getLogger("rigid-flows")
 
@@ -44,7 +45,8 @@ def _compute_quat_contour_levels(
         bins=(jnp.linspace(-1, 1, num_bins + 1), jnp.linspace(-1, 1, num_bins + 1)),  # type: ignore
     )
     h = jnp.log(threshold + h)
-    levels = jnp.linspace(h[h > jnp.log(1e-4)].min(), h.max(), num_levels)
+    h_filtered = h[h > jnp.log(1e-4)]
+    levels = jnp.linspace(h_filtered.min(), h_filtered.max(), num_levels)
     return h, levels
 
 
@@ -166,10 +168,9 @@ def plot_oxygen_positions(samples: Array, data: Array, box: SimulationBox):
     plt.suptitle("projection of oxygen positions")
     for k, (i, j) in enumerate(it.combinations(range(3), 2), start=1):
 
-        plt.subplot(1, 3, k)
+        ax = plt.subplot(1, 3, k)
         _plot_oxy_contour_lines(samples, box, i, j, "black")
         _plot_oxy_contour_lines(data, box, i, j, "red")
-        plt.legend()
         plt.ylabel(labels[j])
         plt.xlabel(labels[i])
     plt.legend(handles=legend_elements)
@@ -197,10 +198,11 @@ def compute_energies(
 
 
 def plot_energy_histogram(
+    label: str,
     energies_data: np.ndarray,
     energies_model: np.ndarray,
     weights: np.ndarray | None = None,
-    num_stds=15.0,
+    num_stds=5.0,
     num_bins=100,
 ):
     assert len(energies_data.shape) == 1
@@ -209,16 +211,24 @@ def plot_energy_histogram(
 
     data_mean = np.mean(energies_data)
     data_std = np.std(energies_data)
+    model_min = np.min(energies_model)
+
+    min_val = data_mean - num_stds * data_std
+    max_val = model_min + num_stds * data_std
+    if np.isnan(max_val) or np.isinf(max_val) or max_val > 1e6:
+        max_val = data_mean + num_stds * data_std
+
     bins = tuple(
         x
         for x in np.linspace(
             data_mean - num_stds * data_std,
-            data_mean + num_stds * data_std,
+            # data_mean + num_stds * data_std,
+            model_min + num_stds,
             num_bins,
         )
     )
     fig = plt.figure()
-    plt.title(f"distribution of energies")
+    plt.title(f"{label}")
     plt.hist(
         np.array(energies_data),
         bins=bins,
@@ -308,17 +318,27 @@ def sample_from_target(
     key: KeyArray,
     target: TargetDensity,
 ) -> Transformed[AugmentedData]:
-    return target.sample(key)
+    out = target.sample(key)
+    return out
 
 
 def sample_from_base(key: KeyArray, base: BaseDensity) -> Transformed[State]:
     return base.sample(key)
 
 
-def compute_sampling_statistics(
+def compute_model_likelihood(
+    samples: Transformed[AugmentedData],
+    flow: Transform[AugmentedData, State],
+    base: BaseDensity,
+):
+    latent, ldj = unpack(flow.forward(samples.obj))
+    return base.potential(latent) - ldj
+
+
+def compute_sample_energies(
     samples: Transformed[AugmentedData],
     target: TargetDensity,
-) -> SamplingStatistics:
+):
     aux_energies = -target.aux_model.log_prob(samples.obj.aux)
     aux_energies = aux_energies.reshape(aux_energies.shape[0], -1).sum(axis=-1)
 
@@ -330,8 +350,19 @@ def compute_sampling_statistics(
         sample_positions, box
     )
     target_energies = omm_energies + aux_energies
+    return omm_energies, aux_energies
+
+
+def compute_sampling_statistics(
+    samples: Transformed[AugmentedData],
+    target: TargetDensity,
+) -> SamplingStatistics:
+
+    omm_energies, aux_energies = compute_sample_energies(samples, target)
+
     model_energies = np.array(samples.ldj)
 
+    target_energies = omm_energies + aux_energies
     weights = compute_stable_weights(model_energies - target_energies)
 
     ess = np.square(np.sum(weights)) / np.sum(np.square(weights))
@@ -358,6 +389,7 @@ class ReportingSpecifications:
     plot_oxygens: bool
     plot_energy_histograms: bool
     report_ess: bool
+    report_likelihood: bool
     save_model: bool
     save_samples: bool
     save_statistics: bool
@@ -415,35 +447,32 @@ def report_model(
 
     logger.info("sampling from data")
     with jit_and_cleanup_cache(
-        batched_sampler(
+        scanned_vmap(
             partial(sample_from_target, target=target),
-            specs.num_samples,
             specs.num_samples_per_batch,
         )
     ) as sample:
-        data_samples = sample(next(chain))
+        data_samples = sample(jax.random.split(next(chain), specs.num_samples))
     assert data_samples is not None
 
     logger.info("sampling from prior")
     with jit_and_cleanup_cache(
-        batched_sampler(
+        scanned_vmap(
             partial(sample_from_base, base=base),
-            specs.num_samples,
             specs.num_samples_per_batch,
         )
     ) as sample:
-        prior_samples = sample(next(chain))
+        prior_samples = sample(jax.random.split(next(chain), specs.num_samples))
     assert prior_samples is not None
 
     logger.info("sampling from model")
     with jit_and_cleanup_cache(
-        batched_sampler(
+        scanned_vmap(
             partial(sample_from_model, base=base, flow=flow),
-            specs.num_samples,
             specs.num_samples_per_batch,
         )
     ) as sample:
-        model_samples = sample(next(chain))
+        model_samples = sample(jax.random.split(next(chain), specs.num_samples))
     assert model_samples is not None
 
     stats = compute_sampling_statistics(model_samples, target)
@@ -500,14 +529,59 @@ def report_model(
     # report ESS
     if specs.report_ess:
         logger.info(f"reporting ESS = {stats.ess}")
-        tf.summary.scalar(f"{scope}/metrics/ess", stats.ess, num_iter)
+        tf.summary.scalar(f"/metrics/ess", stats.ess, num_iter)
+
+    # report NLL
+    if specs.report_likelihood:
+        logger.info(f"reporting likelihood")
+        with jit_and_cleanup_cache(
+            scanned_vmap(
+                partial(compute_model_likelihood, base=base, flow=flow),
+                specs.num_samples_per_batch,
+            )
+        ) as eval_likelihood:
+            data_likelihood = jnp.mean(eval_likelihood(data_samples))
+            model_likelihood = jnp.mean(eval_likelihood(model_samples))
+            tf.summary.scalar(
+                f"/metrics/likelihood/data", data_likelihood, num_iter
+            )
+            tf.summary.scalar(
+                f"/metrics/likelihood/model", model_likelihood, num_iter
+            )
 
     # plot energy histograms
     if specs.plot_energy_histograms:
         logger.info(f"plotting energy histogram")
+        omm_energies, aux_energies = compute_sample_energies(
+            data_samples, target
+        )
+
         fig = plot_energy_histogram(
-            np.array(data_samples.ldj),
-            stats.model_energies,
+            "OpenMM",
+            omm_energies,
+            stats.omm_energies,
             stats.weights,
         )
-        write_figure_to_tensorboard(f"{scope}/plots/energies", fig, num_iter)
+        write_figure_to_tensorboard(
+            f"{scope}/plots/energies/open_mm", fig, num_iter
+        )
+
+        fig = plot_energy_histogram(
+            "OpenMM + Auxiliaries",
+            omm_energies + aux_energies,
+            stats.omm_energies + stats.aux_energies,
+            stats.weights,
+        )
+        write_figure_to_tensorboard(
+            f"{scope}/plots/energies/total", fig, num_iter
+        )
+
+        fig = plot_energy_histogram(
+            "Auxiliaries",
+            aux_energies,
+            stats.aux_energies,
+            stats.weights,
+        )
+        write_figure_to_tensorboard(
+            f"{scope}/plots/energies/auxiliary", fig, num_iter
+        )

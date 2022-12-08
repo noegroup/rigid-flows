@@ -185,11 +185,18 @@ def scanned_vmap(
             out = jnp.concatenate([out_scanned, out_leftover], axis=ax)
             return out
 
+        out_tree = jax.tree_util.tree_structure(out_leftover)
+        out_axes_ = out_axes
+        if jax.tree_util.tree_structure(out_axes_) != out_tree:
+            out_axes_ = jax.tree_util.tree_unflatten(
+                out_tree, (out_axes_,) * out_tree.num_leaves
+            )
+
         out = jax.tree_map(
             merge_outputs,
             out_scanned,
             out_leftover,
-            out_axes,
+            out_axes_,
         )
         return out
 

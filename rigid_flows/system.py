@@ -88,9 +88,13 @@ class OpenMMEnergyModel:
         self,
         pos: np.ndarray,
         box: np.ndarray | None,
+        error_handling: ErrorHandling | None = None,
     ):
         energies = np.empty(pos.shape[0], dtype=np.float32)
         forces = np.empty_like(pos, dtype=np.float32)
+
+        if error_handling is None:
+            error_handling = self.error_handling
 
         if box is not None:
             assert box.shape == (3, 3), f"box.shape = {box.shape}"
@@ -99,8 +103,8 @@ class OpenMMEnergyModel:
         # iterate over batch dimension
         for i in range(len(pos)):
 
-            energy = jnp.full_like(energies[i], jnp.nan)
-            force = jnp.full_like(forces[i], jnp.nan)
+            energy = jnp.empty_like(energies[i])
+            force = jnp.empty_like(forces[i])
 
             try:
                 self.simulation.context.setPositions(pos[i])

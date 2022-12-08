@@ -6,7 +6,12 @@ from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 
-from .system import OpenMMEnergyModel, SimulationBox, SystemSpecification
+from .system import (
+    ErrorHandling,
+    OpenMMEnergyModel,
+    SimulationBox,
+    SystemSpecification,
+)
 
 logger = logging.getLogger("rigid-flows")
 
@@ -37,7 +42,9 @@ class Data:
 
     def recompute_forces(self, model: OpenMMEnergyModel):
         _, forces = model.compute_energies_and_forces(
-            np.array(self.pos), np.diag(np.array(self.box[0]))
+            np.array(self.pos),
+            np.diag(np.array(self.box[0])),
+            error_handling=ErrorHandling.RaiseException,
         )
         return Data(
             pos=self.pos,

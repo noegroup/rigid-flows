@@ -82,9 +82,7 @@ class OpenMMEnergyModel:
 
     def set_box(self, box: SimulationBox):
         box_vectors = np.diag(np.array(box.size))
-        self.simulation.context.setPeriodicBoxVectors(
-            *box_vectors
-        )
+        self.simulation.context.setPeriodicBoxVectors(*box_vectors)
 
     def compute_energies_and_forces(
         self,

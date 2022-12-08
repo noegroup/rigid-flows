@@ -214,16 +214,17 @@ def plot_energy_histogram(
     model_min = np.min(energies_model)
 
     min_val = data_mean - num_stds * data_std
-    max_val = model_min + num_stds * data_std
+    max_val = np.maximum(
+        model_min + num_stds * data_std, data_mean + num_stds * data_std
+    )
     if np.isnan(max_val) or np.isinf(max_val) or max_val > 1e6:
         max_val = data_mean + num_stds * data_std
 
     bins = tuple(
         x
         for x in np.linspace(
-            data_mean - num_stds * data_std,
-            # data_mean + num_stds * data_std,
-            model_min + num_stds,
+            min_val,
+            max_val,
             num_bins,
         )
     )

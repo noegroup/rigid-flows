@@ -4,18 +4,12 @@ from typing import cast
 
 import equinox as eqx
 import jax
-import numpy as np
 import optax
 import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import (
-    GradientTransformation,
-    OptState,
-    huber_loss,
-    safe_root_mean_squares,
-)
+from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
 from tqdm import tqdm
 
 from flox.flow import Transform
@@ -133,11 +127,13 @@ def batch_loss(
 
 
 def get_scheduler(specs: TrainingSpecification):
-    learning_rates = jnp.logspace(
-        specs.init_learning_rate,
-        specs.target_learning_rate,
-        specs.num_epochs + 1,
-        base=10.0,
+    learning_rates = jnp.power(
+        10.0,
+        jnp.linspace(
+            jnp.log10(specs.init_learning_rate),
+            jnp.log10(specs.target_learning_rate),
+            specs.num_epochs + 1,
+        ),
     )
     alphas = learning_rates[1:] / learning_rates[:-1]
     alphas = jnp.concatenate([alphas, jnp.ones((1,))])

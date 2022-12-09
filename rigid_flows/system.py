@@ -110,8 +110,7 @@ class OpenMMEnergyModel:
                     case ErrorHandling.RaiseException:
                         raise e
                     case ErrorHandling.LogWarning:
-                        logger = logging.getLogger("main")
-                        logger.warning(str(e))
+                        logging.warning(str(e))
                     case _:
                         pass
             finally:
@@ -123,7 +122,6 @@ class OpenMMEnergyModel:
     @staticmethod
     def from_specs(specs: SystemSpecification):
         path = f"{specs.path}/model-{specs}.json"
-        logger = logging.getLogger("main")
         logging.info(f"Loading OpenMM model specs from {path}")
         model = WaterModel.load_from_json(path)
         return OpenMMEnergyModel(model, specs.temperature)

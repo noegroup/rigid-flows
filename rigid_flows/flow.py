@@ -199,6 +199,7 @@ class QuatUpdate(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         self.net = TransformerStack(
+            # num_inp=auxiliary_shape[-1] + num_pos,
             num_inp=auxiliary_shape[-1] + num_pos * 2,
             num_out=4 * 4 + 4,  # num_rot,
             num_heads=num_heads,
@@ -222,7 +223,7 @@ class QuatUpdate(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
         # feats = jnp.concatenate([aux, input.pos], axis=-1)
         feats = jnp.concatenate([aux, input.pos[..., 0], input.pos[..., 1]])
-        out = self.net(feats) * 1e-2
+        out = self.net(feats) * 1e-1
 
         mat, reflection = jnp.split(out, (16,), -1)  # type: ignore
 
@@ -293,6 +294,7 @@ class AuxUpdate(eqx.Module):
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.auxiliary_shape = auxiliary_shape
         self.net = TransformerStack(
+            # num_inp=num_dims + num_pos,
             num_inp=num_dims + num_pos * 2,
             num_out=2 * auxiliary_shape[-1],
             num_heads=num_heads,
@@ -324,7 +326,7 @@ class AuxUpdate(eqx.Module):
         shift, scale = jnp.split(out, 2, axis=-1)
         shift = shift.reshape(self.auxiliary_shape)
         scale = scale.reshape(self.auxiliary_shape)
-        scale = scale * 1e-2
+        scale = scale * 1e-1
         return shift, scale
 
     def forward(self, input: State) -> Transformed[State]:
@@ -374,7 +376,7 @@ class PosUpdate(eqx.Module):
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.net = TransformerStack(
             num_inp=num_dims + auxiliary_shape[-1],
-            # num_out=12,
+            # num_out=3,
             num_out=2 * 3,
             num_heads=num_heads,
             num_dims=num_dims,
@@ -396,16 +398,15 @@ class PosUpdate(eqx.Module):
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats) * 1e-2
+        out = self.net(feats)
         out = out.reshape(input.pos.shape)
         norm = norm = jnp.sqrt(1e-12 + jnp.square(out)).sum(
             axis=-1, keepdims=True
         )
         reflection = out / (1.0 + norm) * 0.99
         return reflection
-        # out = out.reshape(input.pos.shape[0], -1)
-        # out = out * 1e-2
-        # return out * 1e-2
+        out = out.reshape(input.pos.shape[0], -1)
+        out = out * 1e-2
         shift, scale = jnp.split(out, 2, axis=-1)
         scale = scale
         return shift, scale
@@ -422,11 +423,11 @@ class PosUpdate(eqx.Module):
         # shift, scale = self.params(input)
         # new, ldj = unpack(Affine(shift, scale).forward(input.pos))
         # ldj = jnp.sum(ldj)
-        # params = self.params(input)
-        # new, ldj = unpack(
-        #     VectorizedTransform(FullAffine(params)).forward(input.pos)
-        #     # VectorizedTransform(FullAffine(params)).forward(input.pos)
-        # )
+        # # params = self.params(input)
+        # # new, ldj = unpack(
+        # #     VectorizedTransform(FullAffine(params)).forward(input.pos)
+        # #     # VectorizedTransform(FullAffine(params)).forward(input.pos)
+        # # )
         # return Transformed(lenses.bind(input).pos.set(new), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
@@ -441,43 +442,43 @@ class PosUpdate(eqx.Module):
         # shift, scale = self.params(input)
         # new, ldj = unpack(Affine(shift, scale).inverse(input.pos))
         # ldj = jnp.sum(ldj)
-        # params = self.params(input)
-        # new, ldj = unpack(
-        #     VectorizedTransform(FullAffine(params)).inverse(input.pos)
-        #     # VectorizedTransform(FullAffine(params)).inverse(input.pos)
-        # )
+        # # params = self.params(input)
+        # # new, ldj = unpack(
+        # #     VectorizedTransform(FullAffine(params)).inverse(input.pos)
+        # #     # VectorizedTransform(FullAffine(params)).inverse(input.pos)
+        # # )
         # return Transformed(lenses.bind(input).pos.set(new), ldj)
 
 
-# def log_cosh(x):
-#     return jax.nn.logsumexp(jnp.stack([x, -x], axis=0), axis=0) + jnp.log(0.5)
+def log_cosh(x):
+    return jax.nn.logsumexp(jnp.stack([x, -x], axis=0), axis=0) + jnp.log(0.5)
 
 
-# def tanh_transform(
-#     x,
-# ):
-#     y = jnp.tanh(x)
-#     ldj = -2 * log_cosh(x)
-#     return y, jnp.sum(ldj)
+def tanh_transform(
+    x,
+):
+    y = jnp.tanh(x)
+    ldj = -2 * log_cosh(x)
+    return y, jnp.sum(ldj)
 
 
-# def atanh_transform(
-#     x,
-# ):
-#     x = jnp.clip(x, -1.0 + 1e-4, 1.0 - 1e-4)
-#     y = jnp.arctanh(x)
-#     ldj = jnp.log(1.0 / (1.0 - jnp.square(x)))
-#     # ldj = 2 * log_cosh(y)
-#     return y, jnp.sum(ldj)
+def atanh_transform(
+    x,
+):
+    x = jnp.clip(x, -1.0 + 1e-4, 1.0 - 1e-4)
+    y = jnp.arctanh(x)
+    ldj = jnp.log(1.0 / (1.0 - jnp.square(x)))
+    # ldj = 2 * log_cosh(y)
+    return y, jnp.sum(ldj)
 
 
-# @pytree_dataclass(frozen=True)
-# class AtanhTransform:
-#     def forward(self, input: Array) -> Transformed[Array]:
-#         return Transformed(*atanh_transform(input))
+@pytree_dataclass(frozen=True)
+class AtanhTransform:
+    def forward(self, input: Array) -> Transformed[Array]:
+        return Transformed(*atanh_transform(input))
 
-#     def inverse(self, input: Array) -> Transformed[Array]:
-# return Transformed(*tanh_transform(input))
+    def inverse(self, input: Array) -> Transformed[Array]:
+        return Transformed(*tanh_transform(input))
 
 
 class DisplacementEncoder(eqx.Module):
@@ -542,7 +543,7 @@ class DisplacementEncoder(eqx.Module):
         out = self.net(feats) * 1e-1
         out = jnp.tanh(out) * jnp.pi
         center = jax.vmap(jax.vmap(geom.rotmat2d))(out)
-        # center = out.reshape(input.pos.shape[:-1])
+        # center = out.reshape(input.pos.shape)
         # center = jax.nn.sigmoid(center) * input.box.size
         return center
 
@@ -581,8 +582,9 @@ class InitialTransform:
             VectorizedTransform(RigidTransform()).forward(input.pos)
         )
         rigid = lenses.bind(rigid).rot.set(rigid.rot * input.sign)
+        # pos = rigid.pos
         pos = (rigid.pos % input.box.size) / input.box.size
-        pos = rigid.pos * (2 * jnp.pi) - jnp.pi
+        pos = pos * (2 * jnp.pi) - jnp.pi
         pos = jnp.stack(
             [
                 jnp.cos(pos),
@@ -595,6 +597,7 @@ class InitialTransform:
         return Transformed(state, ldj)
 
     def inverse(self, input: State) -> Transformed[AugmentedData]:
+        # pos = input.pos
         pos = jnp.arctan2(input.pos[..., 1], input.pos[..., 0])
         pos = (pos + jnp.pi) / (2 * jnp.pi)
         pos = pos * input.box.size

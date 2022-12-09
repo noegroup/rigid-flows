@@ -82,8 +82,8 @@ train:
   # first stage: only likelihood
   - num_epochs: 2
     num_iters_per_epoch: 1000
-    init_learning_rate: 0.0001
-    target_learning_rate: 0.0001
+    init_learning_rate: 0.001
+    target_learning_rate: 0.001
     weight_nll: 1.0
     weight_fm: 0.0
     weight_fe: 0.0

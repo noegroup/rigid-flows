@@ -103,13 +103,15 @@ def main():
     args = parser.parse_args()
 
     writer, local_run_dir = setup_tensorboard(args.run_dir)
+
+    logging.getLogger().setLevel(logging.INFO)
+
     logging.info(f"Logging tensorboard logs to {local_run_dir}.")
 
     logging.basicConfig(
-        filename=f"{local_run_dir}/logs.txt",
+        filename=f"logs.txt",
         filemode="w",
         encoding="utf-8",
-        level=logging.DEBUG,
     )
 
     logging.info(f"Loading specs from {args.specs}.")

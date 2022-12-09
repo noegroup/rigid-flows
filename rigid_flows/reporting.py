@@ -1,5 +1,6 @@
 import io
 import itertools as it
+import json
 import logging
 from dataclasses import asdict
 from functools import partial
@@ -25,10 +26,14 @@ from flox._src.util.misc import unpack
 from .data import AugmentedData
 from .density import BaseDensity, KeyArray, TargetDensity
 from .flow import InitialTransform, State
+from .specs import ReportingSpecifications
 from .system import OpenMMEnergyModel, SimulationBox
 from .utils import jit_and_cleanup_cache, scanned_vmap
 
-logger = logging.getLogger("rigid-flows")
+
+def pretty_json(hp):
+    json_hp = json.dumps(hp, indent=2)
+    return "".join("\t" + line for line in json_hp.splitlines(True))
 
 
 def _compute_quat_contour_levels(
@@ -128,7 +133,8 @@ def _compute_oxy_contour_levels(
 ) -> tuple[Array, ...]:
     h, *bins = jnp.histogram2d(xi, xj, density=True, bins=num_bins + 1)
     h = jnp.log(threshold + h)
-    levels = jnp.linspace(h[h > jnp.log(1e-4)].min(), h.max(), num_levels)
+    h_filtered = h[h > jnp.log(1e-4)]
+    levels = jnp.linspace(h_filtered.min(), h_filtered.max(), num_levels)
     return h, levels, *bins
 
 
@@ -379,21 +385,7 @@ def compute_sampling_statistics(
 
 
 def save_summary(path: str, data: Any):
-    np.savez(path, **asdict(data))
-
-
-@pytree_dataclass(frozen=True)
-class ReportingSpecifications:
-    num_samples: int
-    num_samples_per_batch: int
-    plot_quaternions: tuple[int, ...] | None
-    plot_oxygens: bool
-    plot_energy_histograms: bool
-    report_ess: bool
-    report_likelihood: bool
-    save_model: bool
-    save_samples: bool
-    save_statistics: bool
+    np.savez_compressed(path, **asdict(data))
 
 
 @pytree_dataclass(frozen=True)
@@ -437,16 +429,18 @@ def report_model(
     flow: Transform[AugmentedData, State],
     base: BaseDensity,
     target: TargetDensity,
-    num_iter: int,
+    tot_iter: int,
     run_dir: str,
     scope: str,
     specs: ReportingSpecifications,
 ):
     chain = key_chain(key)
 
-    logger.info("preparing report")
+    logger = logging.getLogger("main")
 
-    logger.info("sampling from data")
+    logging.info("preparing report")
+
+    logging.info("sampling from data")
     with jit_and_cleanup_cache(
         scanned_vmap(
             partial(sample_from_target, target=target),
@@ -456,7 +450,7 @@ def report_model(
         data_samples = sample(jax.random.split(next(chain), specs.num_samples))
     assert data_samples is not None
 
-    logger.info("sampling from prior")
+    logging.info("sampling from prior")
     with jit_and_cleanup_cache(
         scanned_vmap(
             partial(sample_from_base, base=base),
@@ -466,7 +460,7 @@ def report_model(
         prior_samples = sample(jax.random.split(next(chain), specs.num_samples))
     assert prior_samples is not None
 
-    logger.info("sampling from model")
+    logging.info("sampling from model")
     with jit_and_cleanup_cache(
         scanned_vmap(
             partial(sample_from_model, base=base, flow=flow),
@@ -480,25 +474,25 @@ def report_model(
 
     artifact_path = f"{run_dir}/{scope}"
     Path(artifact_path).mkdir(parents=True, exist_ok=True)
-    logger.info(f"Saving artifacts to {artifact_path}")
+    logging.info(f"Saving artifacts to {artifact_path}")
 
     # save model
     if specs.save_model:
         path = f"{artifact_path}/model.eqx"
-        logger.info(f"Saving model to {path}")
+        logging.info(f"Saving model to {path}")
         eqx.tree_serialise_leaves(path, flow)
 
     # save model samples
     if specs.save_samples:
         path = f"{artifact_path}/samples.npz"
-        logger.info(f"Saving samples to {path}")
+        logging.info(f"Saving samples to {path}")
         save_summary(path, model_samples)
 
     # save sample statistics
     if specs.save_statistics:
         path = f"{artifact_path}/stats.npz"
         save_summary(path, stats)
-        logger.info(f"Saving statistics to {path}")
+        logging.info(f"Saving statistics to {path}")
 
     # plot quaternion histograms
     if specs.plot_quaternions is not None:
@@ -509,11 +503,11 @@ def report_model(
             model_samples.obj
         ).obj.rot
         prior_quats = prior_samples.obj.rot
-        logger.info(f"plotting quaternions")
+        logging.info(f"plotting quaternions")
         fig = plot_quaternions(
             data_quats, model_quats, prior_quats, specs.plot_quaternions
         )
-        write_figure_to_tensorboard(f"{scope}/plots/quaternions", fig, num_iter)
+        write_figure_to_tensorboard(f"{scope}/plots/quaternions", fig, tot_iter)
 
     # plot oxygen histograms
     if specs.plot_oxygens:
@@ -523,25 +517,23 @@ def report_model(
         model_pos = jax.vmap(InitialTransform().forward)(
             model_samples.obj
         ).obj.pos
-        logger.info(f"plotting oxygens")
+        logging.info(f"plotting oxygens")
         fig = plot_oxygen_positions(model_pos, data_pos, target.box)
-        write_figure_to_tensorboard(f"{scope}/plots/oxygens", fig, num_iter)
+        write_figure_to_tensorboard(f"{scope}/plots/oxygens", fig, tot_iter)
 
     # report ESS
     if specs.report_ess:
-        logger.info(f"reporting ESS = {stats.ess}")
-        tf.summary.scalar(f"/metrics/ess", stats.ess, num_iter)
+        logging.info(f"reporting ESS = {stats.ess}")
+        tf.summary.scalar(f"/metrics/ess", stats.ess, tot_iter)
         log_weights = jnp.log(stats.weights)
         log_weights = log_weights[
             (~jnp.isnan(log_weights)) & (~jnp.isinf(log_weights))
         ]
-        tf.summary.histogram(
-            "/metrics/model_energies/data", log_weights, step=num_iter
-        )
+        tf.summary.histogram("/metrics/log_weights", log_weights, step=tot_iter)
 
     # report NLL
     if specs.report_likelihood:
-        logger.info(f"reporting likelihood")
+        logging.info(f"reporting likelihood")
         with jit_and_cleanup_cache(
             scanned_vmap(
                 partial(compute_model_likelihood, base=base, flow=flow),
@@ -551,23 +543,23 @@ def report_model(
             data_likelihood = eval_likelihood(data_samples)
             model_likelihood = eval_likelihood(model_samples)
             tf.summary.scalar(
-                f"/metrics/likelihood/data", jnp.mean(data_likelihood), num_iter
+                f"/metrics/likelihood/data", jnp.mean(data_likelihood), tot_iter
             )
             tf.summary.scalar(
                 f"/metrics/likelihood/model",
                 jnp.mean(model_likelihood),
-                num_iter,
+                tot_iter,
             )
             tf.summary.histogram(
-                "/metrics/model_energies/data", data_likelihood, step=num_iter
+                "/metrics/energies/model/data", data_likelihood, step=tot_iter
             )
             tf.summary.histogram(
-                "metrics/model_energies/model", model_likelihood, step=num_iter
+                "metrics/energies/model/model", model_likelihood, step=tot_iter
             )
 
     # plot energy histograms
     if specs.plot_energy_histograms:
-        logger.info(f"plotting energy histogram")
+        logging.info(f"plotting energy histogram")
         omm_energies, aux_energies = compute_sample_energies(
             data_samples, target
         )
@@ -579,17 +571,17 @@ def report_model(
             stats.weights,
         )
         tf.summary.histogram(
-            f"{scope}/histograms/energies/open_mm/data",
+            f"/metrics/energies/open_mm/data",
             omm_energies,
-            step=num_iter,
+            step=tot_iter,
         )
         tf.summary.histogram(
-            f"{scope}/histograms/energies/open_mm/model",
+            f"/metrics/energies/open_mm/model",
             stats.omm_energies,
-            step=num_iter,
+            step=tot_iter,
         )
         write_figure_to_tensorboard(
-            f"{scope}/plots/energies/open_mm", fig, num_iter
+            f"{scope}/plots/energies/open_mm", fig, tot_iter
         )
 
         fig = plot_energy_histogram(
@@ -599,17 +591,17 @@ def report_model(
             stats.weights,
         )
         tf.summary.histogram(
-            f"{scope}/histograms/energies/open_mm+aux/data",
+            f"/metrics/energies/open_mm+aux/data",
             omm_energies + aux_energies,
-            step=num_iter,
+            step=tot_iter,
         )
         tf.summary.histogram(
-            f"{scope}/histograms/energies/open_mm+aux/model",
+            f"/metrics/energies/open_mm+aux/model",
             stats.omm_energies + stats.aux_energies,
-            step=num_iter,
+            step=tot_iter,
         )
         write_figure_to_tensorboard(
-            f"{scope}/plots/energies/total", fig, num_iter
+            f"{scope}/plots/energies/total", fig, tot_iter
         )
 
         fig = plot_energy_histogram(
@@ -619,13 +611,13 @@ def report_model(
             stats.weights,
         )
         tf.summary.histogram(
-            f"{scope}/histograms/energies/aux/data", aux_energies, step=num_iter
+            f"/metrics/energies/aux/data", aux_energies, step=tot_iter
         )
         tf.summary.histogram(
-            f"{scope}/histograms/energies/aux/model",
+            f"/metrics/energies/aux/model",
             stats.aux_energies,
-            step=num_iter,
+            step=tot_iter,
         )
         write_figure_to_tensorboard(
-            f"{scope}/plots/energies/auxiliary", fig, num_iter
+            f"{scope}/plots/energies/auxiliary", fig, tot_iter
         )

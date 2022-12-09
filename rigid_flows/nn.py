@@ -170,7 +170,7 @@ class TransformerStack(eqx.Module):
         if self.reduce_output:
             out = out.sum(axis=0)
         else:
-            out = out.reshape(input.shape[0], -1)
+            out = out.reshape(16, -1)
         return out
         input = jax.vmap(self.encoder)(input)
         for transformer in self.transformers:

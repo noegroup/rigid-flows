@@ -6,19 +6,14 @@ import jax
 import jax.numpy as jnp
 import tensorflow_probability.substrates.jax as tfp  # type: ignore
 from jax import Array
-from jax_dataclasses import pytree_dataclass
 
 from flox.flow import Transformed
 from flox.util import key_chain
 
 from .data import AugmentedData, Data
 from .flow import InternalCoordinates, State
-from .system import (
-    OpenMMEnergyModel,
-    SimulationBox,
-    SystemSpecification,
-    wrap_openmm_model,
-)
+from .specs import BaseSpecification, SystemSpecification, TargetSpecification
+from .system import OpenMMEnergyModel, SimulationBox, wrap_openmm_model
 
 T = TypeVar("T")
 
@@ -33,19 +28,16 @@ class DensityModel(Protocol[T]):
         ...
 
 
-@pytree_dataclass(frozen=True)
-class BaseSpecification:
-    rot_concentration: float
-
-
 class BaseDensity(DensityModel[State]):
     def __init__(
         self,
         box: SimulationBox,
         rot_modes: Array,
         rot_concentration: Array,
-        pos_means: Array,
-        pos_stds: Array,
+        # pos_means: Array,
+        # pos_stds: Array,
+        pos_modes: Array,
+        pos_concentration,
         aux_means: Array,
         aux_stds: Array,
     ):
@@ -53,7 +45,10 @@ class BaseDensity(DensityModel[State]):
         self.rot_model = tfp.distributions.VonMisesFisher(
             rot_modes, rot_concentration
         )
-        self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        # self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        self.pos_model = tfp.distributions.VonMisesFisher(
+            pos_modes, pos_concentration
+        )
         self.aux_model = tfp.distributions.Normal(aux_means, aux_stds)
 
     def potential(self, inp: State) -> Array:
@@ -117,8 +112,14 @@ class BaseDensity(DensityModel[State]):
             ),
             rot_concentration=base_specs.rot_concentration
             * jnp.ones((system_specs.num_molecules,)),
-            pos_means=jnp.zeros((system_specs.num_molecules, 3)),
-            pos_stds=jnp.ones((system_specs.num_molecules, 3)),
+            # pos_means=jnp.zeros((system_specs.num_molecules, 3,)),
+            # pos_stds=jnp.ones((system_specs.num_molecules, 3)),
+            pos_modes=jnp.tile(
+                jnp.array([1.0, 0.0])[None, None],
+                (system_specs.num_molecules, 3, 1),
+            ),
+            pos_concentration=base_specs.pos_concentration
+            * jnp.ones((system_specs.num_molecules, 3)),
             aux_means=jnp.zeros(auxiliary_shape),
             aux_stds=jnp.ones(auxiliary_shape),
         )
@@ -152,11 +153,6 @@ def cutoff_potential(
     eval.defvjp(eval_fwd, eval_bwd)
 
     return eval
-
-
-@pytree_dataclass(frozen=True)
-class TargetSpecification:
-    cutoff_threshold: float | None
 
 
 class TargetDensity(DensityModel[AugmentedData]):

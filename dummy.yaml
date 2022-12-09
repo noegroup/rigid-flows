@@ -1,19 +1,17 @@
 # random seed of the model
 seed: 42
 
-run_dir: "./runs"
-
 reporting:
   num_samples: 1000
   num_samples_per_batch: 1000
-  plot_quaternions: [4, 7]
+  plot_quaternions: [1, 5] 
   plot_oxygens: true
   plot_energy_histograms: true
   report_ess: true
-  report_likelihood: true
-  save_model: true
-  save_samples: true
-  save_statistics: true
+  report_likelihood: true 
+  save_model: false
+  save_samples: false
+  save_statistics: false
 
 model:
 
@@ -31,36 +29,37 @@ model:
       auxiliary_update:
         num_heads: 4
         num_dims: 64
-        num_hidden: 1024
+        num_hidden: 64
         num_blocks: 1
       displacement_encoder:
         num_heads: 4
         num_dims: 64
-        num_hidden: 1024
+        num_hidden: 64
         num_blocks: 1
 
     # coupling layers
     couplings:
-      - num_repetitions: 1
+      - num_repetitions: 2
         auxiliary_update:
           num_heads: 4
           num_dims: 64
-          num_hidden: 1024
+          num_hidden: 64
           num_blocks: 1
         position_update:
           num_heads: 4
           num_dims: 64
-          num_hidden: 1024
+          num_hidden: 64
           num_blocks: 1
         quaternion_update:
           num_heads: 4
           num_dims: 64
-          num_hidden: 1024
+          num_hidden: 64
           num_blocks: 1
-      
+
   # base density
   base:
     rot_concentration: 40
+    pos_concentration: 40
 
   # target density
   target:
@@ -83,32 +82,10 @@ train:
   # first stage: only likelihood
   - num_epochs: 2
     num_iters_per_epoch: 1000
-    init_learning_rate: 0.001
-    target_learning_rate: 0.000001
+    init_learning_rate: 0.0001
+    target_learning_rate: 0.0001
     weight_nll: 1.0
     weight_fm: 0.0
     weight_fe: 0.0
     fm_aggregation: mse
     num_samples: 128
-
-  # first stage: only likelihood
-  - num_epochs: 2
-    num_iters_per_epoch: 1000
-    init_learning_rate: 0.001
-    target_learning_rate: 0.000001
-    weight_nll: 1.0
-    weight_fm: 0.0
-    weight_fe: 0.0
-    fm_aggregation: mse
-    num_samples: 128
-
-  # second stage: likelihood with force-matching
-  # - num_epochs: 1
-  #   num_iters_per_epoch: 1
-  #   init_learning_rate: 0.001
-  #   target_learning_rate: 0.000001
-  #   weight_nll: 1.0
-  #   weight_fm: 0.1
-  #   weight_fe: 0.0
-  #   fm_aggregation: mse
-  #   num_samples: 128

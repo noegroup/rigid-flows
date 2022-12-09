@@ -30,7 +30,7 @@ class Data:
         specs: SystemSpecification,
     ):
         path = f"{specs.path}/MDtraj-{specs}.npz"
-        logger.info(f"Loading data from {path}")
+        logging.info(f"Loading data from {path}")
         raw = np.load(path)
         data = Data(*map(jnp.array, raw.values()))
         if data.box.shape[1:] == (3, 3):

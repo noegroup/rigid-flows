@@ -10,7 +10,12 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
+from optax import (
+    GradientTransformation,
+    OptState,
+    huber_loss,
+    safe_root_mean_squares,
+)
 from tqdm import tqdm
 
 from flox.flow import Transform
@@ -20,6 +25,7 @@ from .data import AugmentedData
 from .density import BaseDensity, DensityModel, TargetDensity
 from .flow import State
 from .reporting import Reporter
+from .specs import TrainingSpecification
 from .utils import jit_and_cleanup_cache
 
 KeyArray = Array | jax.random.PRNGKeyArray
@@ -126,27 +132,12 @@ def batch_loss(
     )
 
 
-@pytree_dataclass(frozen=True)
-class TrainingSpecification:
-    num_epochs: int
-    num_iters_per_epoch: int
-    init_learning_rate: float
-    target_learning_rate: float
-    weight_nll: float
-    weight_fm: float
-    weight_fe: float
-    fm_aggregation: str | None
-    num_samples: int
-
-
 def get_scheduler(specs: TrainingSpecification):
-    learning_rates = jnp.power(
-        10.0,
-        jnp.linspace(
-            jnp.log10(specs.init_learning_rate),
-            jnp.log10(specs.target_learning_rate),
-            specs.num_epochs + 1,
-        ),
+    learning_rates = jnp.logspace(
+        specs.init_learning_rate,
+        specs.target_learning_rate,
+        specs.num_epochs + 1,
+        base=10.0,
     )
     alphas = learning_rates[1:] / learning_rates[:-1]
     alphas = jnp.concatenate([alphas, jnp.ones((1,))])
@@ -228,6 +219,7 @@ def run_training_stage(
     flow: Flow,
     training_specs: TrainingSpecification,
     reporter: Reporter,
+    tot_iter: int,
 ):
 
     chain = key_chain(key)
@@ -237,14 +229,13 @@ def run_training_stage(
     opt_state = trainer.init(next(chain), flow)
 
     with jit_and_cleanup_cache(trainer.step) as step:
-        tot_iter = 0
         for num_epoch in range(training_specs.num_epochs):
             epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
             pbar = tqdm(
                 range(training_specs.num_iters_per_epoch),
-                desc=f"Epoch: {num_epoch}"
+                desc=f"Epoch: {num_epoch}",
             )
-            for num_iter in pbar:
+            for _ in pbar:
                 loss, flow, opt_state = step(next(chain), flow, opt_state)
                 tf.summary.scalar(f"{reporter.scope}/loss", loss, tot_iter)
                 tf.summary.scalar(

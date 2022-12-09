@@ -11,9 +11,8 @@ from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 from openmm import unit  # type: ignore
 
+from .specs import SystemSpecification
 from .systems.watermodel import WaterModel
-
-logger = logging.getLogger("run.example")
 
 
 @pytree_dataclass(frozen=True)
@@ -33,19 +32,6 @@ class SimulationBox:
     @property
     def size(self):
         return self.max - self.min
-
-
-@pytree_dataclass(frozen=True)
-class SystemSpecification:
-    path: str
-    num_molecules: int
-    temperature: int
-    ice_type: str
-    recompute_forces: bool
-    fixed_box: bool
-
-    def __str__(self) -> str:
-        return f"ice{self.ice_type}_T{self.temperature}_N{self.num_molecules}"
 
 
 class ErrorHandling(enum.Enum):
@@ -124,6 +110,7 @@ class OpenMMEnergyModel:
                     case ErrorHandling.RaiseException:
                         raise e
                     case ErrorHandling.LogWarning:
+                        logger = logging.getLogger("main")
                         logger.warning(str(e))
                     case _:
                         pass
@@ -136,7 +123,8 @@ class OpenMMEnergyModel:
     @staticmethod
     def from_specs(specs: SystemSpecification):
         path = f"{specs.path}/model-{specs}.json"
-        logger.info(f"Loading OpenMM model specs from {path}")
+        logger = logging.getLogger("main")
+        logging.info(f"Loading OpenMM model specs from {path}")
         model = WaterModel.load_from_json(path)
         return OpenMMEnergyModel(model, specs.temperature)
 

@@ -425,7 +425,7 @@ class PosUpdate(eqx.Module):
 
         pos = input.pos - input.com
         new, ldj = unpack(Affine(shift, scale).forward(pos))
-        new = input.pos + input.com
+        new = new + input.com
         ldj = jnp.sum(ldj)
         # params = self.params(input)
         # new, ldj = unpack(
@@ -446,8 +446,8 @@ class PosUpdate(eqx.Module):
         shift, scale = self.params(input)
 
         pos = input.pos - input.com
-        new, ldj = unpack(Affine(shift, scale).inverse(input.pos))
-        new = input.pos + input.com
+        new, ldj = unpack(Affine(shift, scale).inverse(pos))
+        new = new + input.com
 
         ldj = jnp.sum(ldj)
         # params = self.params(input)

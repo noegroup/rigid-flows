@@ -447,7 +447,9 @@ def report_model(
             specs.num_samples_per_batch,
         )
     ) as sample:
-        data_samples = sample(jax.random.split(next(chain), specs.num_samples))
+        data_samples: Transformed[AugmentedData] = sample(
+            jax.random.split(next(chain), specs.num_samples)
+        )
     assert data_samples is not None
 
     logging.info("sampling from prior")
@@ -457,7 +459,9 @@ def report_model(
             specs.num_samples_per_batch,
         )
     ) as sample:
-        prior_samples = sample(jax.random.split(next(chain), specs.num_samples))
+        prior_samples: Transformed[State] = sample(
+            jax.random.split(next(chain), specs.num_samples)
+        )
     assert prior_samples is not None
 
     logging.info("sampling from model")
@@ -467,7 +471,9 @@ def report_model(
             specs.num_samples_per_batch,
         )
     ) as sample:
-        model_samples = sample(jax.random.split(next(chain), specs.num_samples))
+        model_samples: Transformed[AugmentedData] = sample(
+            jax.random.split(next(chain), specs.num_samples)
+        )
     assert model_samples is not None
 
     stats = compute_sampling_statistics(model_samples, target)
@@ -511,24 +517,20 @@ def report_model(
 
     # plot oxygen histograms
     if specs.plot_oxygens:
-        data_pos = jax.vmap(InitialTransform().forward)(
-            data_samples.obj
-        ).obj.pos
-        # data_pos = (
-        #     data_samples.obj.pos.reshape(
-        #         data_samples.obj.pos.shape[0], -1, 4, 3
-        #     )[:, :, 0]
-        #     % target.box.size
-        # )
-        model_pos = jax.vmap(InitialTransform().forward)(
-            model_samples.obj
-        ).obj.pos
-        # model_pos = (
-        #     model_samples.obj.pos.reshape(
-        #         model_samples.obj.pos.shape[0], -1, 4, 3
-        #     )[:, :, 0]
-        #     % target.box.size
-        # )
+        # data_pos = jax.vmap(InitialTransform().forward)(
+        #     data_samples.obj
+        # ).obj.pos
+        # data_pos = data_pos - data_samples.obj.com[:, None, :
+        data_pos = data_samples.obj.pos.reshape(
+            data_samples.obj.pos.shape[0], -1, 4, 3
+        )[:, :, 0]
+        # model_pos = jax.vmap(InitialTransform().forward)(
+        #     model_samples.obj
+        # ).obj.pos
+        # model_pos = model_pos - model_samples.obj.com[:, None, :]
+        model_pos = model_samples.obj.pos.reshape(
+            model_samples.obj.pos.shape[0], -1, 4, 3
+        )[:, :, 0]
         logging.info(f"plotting oxygens")
         fig = plot_oxygen_positions(model_pos, data_pos, target.box)
         write_figure_to_tensorboard(f"{scope}/plots/oxygens", fig, tot_iter)

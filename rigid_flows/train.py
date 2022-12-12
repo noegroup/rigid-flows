@@ -9,7 +9,12 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
+from optax import (
+    GradientTransformation,
+    OptState,
+    huber_loss,
+    safe_root_mean_squares,
+)
 from tqdm import tqdm
 
 from flox.flow import Transform
@@ -84,19 +89,26 @@ def per_sample_loss(
     weight_fe: float,
     fm_aggregation: str | None,
 ):
-    loss = 0.0
     chain = key_chain(key)
+
+    losses = {}
     if weight_nll > 0:
         inp, _ = unpack(target.sample(next(chain)))
-        loss += weight_nll * negative_log_likelihood(inp, base, flow)
+        nll_loss = weight_nll * negative_log_likelihood(inp, base, flow)
+        losses["nll"] = nll_loss
     if weight_fm > 0:
         assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
-        loss += weight_fm * force_matching_loss(inp, base, flow, fm_aggregation)
+        fm_loss = weight_fm * force_matching_loss(
+            inp, base, flow, fm_aggregation
+        )
+        losses["fm"] = fm_loss
     if weight_fe > 0:
         inp, _ = unpack(base.sample(next(chain)))
-        loss += weight_fe * free_energy_loss(inp, target, flow)
-    return loss
+        kl_loss = weight_fe * free_energy_loss(inp, target, flow)
+        losses["kl"] = kl_loss
+    total_loss = sum(losses.values()) / len(losses)
+    return total_loss, losses
 
 
 def batch_loss(
@@ -110,20 +122,20 @@ def batch_loss(
     fm_aggregation: str | None,
     num_samples: int,
 ):
-    return jnp.mean(
-        jax.vmap(
-            partial(
-                per_sample_loss,
-                base=base,
-                target=target,
-                flow=flow,
-                weight_nll=weight_nll,
-                weight_fm=weight_fm,
-                weight_fe=weight_fe,
-                fm_aggregation=fm_aggregation,
-            )
-        )(jax.random.split(key, num_samples))
-    )
+    total_loss, losses = jax.vmap(
+        partial(
+            per_sample_loss,
+            base=base,
+            target=target,
+            flow=flow,
+            weight_nll=weight_nll,
+            weight_fm=weight_fm,
+            weight_fe=weight_fe,
+            fm_aggregation=fm_aggregation,
+        )
+    )(jax.random.split(key, num_samples))
+    losses = jax.tree_map(jnp.mean, losses)
+    return jnp.mean(total_loss), losses
 
 
 def get_scheduler(specs: TrainingSpecification):
@@ -169,13 +181,14 @@ class Trainer:
         opt_state = self.optim.init(params)
         return opt_state
 
+    # jax.value_and_grad()
     def step(
         self,
         key: KeyArray,
         flow: Flow,
         opt_state: OptState,
     ):
-        loss, grad = eqx.filter_value_and_grad(
+        (loss, losses), grad = eqx.filter_value_and_grad(
             lambda flow: batch_loss(
                 key=key,
                 flow=flow,
@@ -186,11 +199,12 @@ class Trainer:
                 weight_fm=self.weight_fm,
                 weight_fe=self.weight_fe,
                 fm_aggregation=self.fm_aggregation,
-            )
+            ),
+            has_aux=True,
         )(flow)
         updates, opt_state = self.optim.update(grad, opt_state)
         flow = cast(Flow, eqx.apply_updates(flow, updates))
-        return loss, flow, opt_state
+        return loss, flow, opt_state, losses
 
     @staticmethod
     def from_specs(
@@ -232,8 +246,17 @@ def run_training_stage(
                 desc=f"Epoch: {num_epoch}",
             )
             for _ in pbar:
-                loss, flow, opt_state = step(next(chain), flow, opt_state)
-                tf.summary.scalar(f"{reporter.scope}/loss", loss, tot_iter)
+                loss, flow, opt_state, other_losses = step(
+                    next(chain), flow, opt_state
+                )
+                tf.summary.scalar(
+                    f"{reporter.scope}/loss/total", loss, tot_iter
+                )
+                for name, val in other_losses.items():
+                    tf.summary.scalar(
+                        f"{reporter.scope}/loss/{name}", val, tot_iter
+                    )
+
                 tf.summary.scalar(
                     f"{reporter.scope}/learning_rate",
                     scheduler(tot_iter),

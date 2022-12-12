@@ -74,9 +74,9 @@ class BaseDensity(DensityModel[State]):
             axis=0,
         ).sum()
         pos_prob = self.pos_model.log_prob(inp.pos).sum()
-        com_prob = self.com_model.log_prob(inp.com).sum()
+        # com_prob = self.com_model.log_prob(inp.com).sum()
         aux_prob = self.aux_model.log_prob(inp.aux).sum()
-        return -(rot_prob + aux_prob + pos_prob + com_prob)
+        return -(rot_prob + aux_prob + pos_prob)
 
     def sample(self, key: KeyArray) -> Transformed[State]:
         """Samples from the base density
@@ -95,10 +95,10 @@ class BaseDensity(DensityModel[State]):
             jax.random.normal(next(chain), shape=(rot.shape[0], 1))
         )
         pos = self.pos_model.sample(seed=next(chain))
-        com = self.com_model.sample(seed=next(chain))
+        # com = self.com_model.sample(seed=next(chain))
         ics = InternalCoordinates()
         aux = self.aux_model.sample(seed=next(chain))
-        state = State(rot, pos, com, ics, aux, self.box)
+        state = State(rot, pos, ics, aux, self.box)
         log_prob = self.potential(state)
         return Transformed(state, log_prob)
 
@@ -179,7 +179,7 @@ class TargetDensity(DensityModel[AugmentedData]):
         aux_stds = jnp.ones(auxiliary_shape)
 
         com_means = jnp.zeros((3,))
-        com_stds = jnp.ones((3,))
+        com_stds = jnp.ones((3,)) * 5e-2
 
         self.aux_model = tfp.distributions.Normal(aux_means, aux_stds)
         self.com_model = tfp.distributions.Normal(com_means, com_stds)
@@ -260,14 +260,13 @@ class TargetDensity(DensityModel[AugmentedData]):
             aux = self.aux_model.sample(seed=next(chain))
             com = self.com_model.sample(seed=next(chain))
 
-            pos = pos - pos.mean(axis=(0, 1))[None, None]
-            pos = pos + com[None, None]
+            pos = pos - pos.mean(axis=(0, 1))
 
             if self.data.force is not None:
                 force = self.data.force[idx]
-                force += jax.grad(lambda x: self.com_model.log_prob(x).sum())(
-                    com
-                )
+                # force += jax.grad(lambda x: self.com_model.log_prob(x).sum())(
+                #     com
+                # )
             else:
                 force = None
 

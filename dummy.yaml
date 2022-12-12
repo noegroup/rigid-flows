@@ -85,7 +85,7 @@ train:
     init_learning_rate: 0.001
     target_learning_rate: 0.0005
     weight_nll: 1.0
-    weight_fm: 0.001
+    weight_fm: 0.0
     weight_fe: 0.0
     fm_aggregation: huber
     num_samples: 128

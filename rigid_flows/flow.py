@@ -424,15 +424,16 @@ class PosUpdate(eqx.Module):
         shift, scale = self.params(input)
 
         pos = input.pos - input.com
-        new, ldj = unpack(Affine(shift, scale).forward(pos))
-        new = new + input.com
+        pos, ldj = unpack(Affine(shift, scale).forward(pos))
+        pos = pos + input.com
+
         ldj = jnp.sum(ldj)
         # params = self.params(input)
         # new, ldj = unpack(
         #     VectorizedTransform(FullAffine(params)).forward(input.pos)
         #     # VectorizedTransform(FullAffine(params)).forward(input.pos)
         # )
-        return Transformed(lenses.bind(input).pos.set(new), ldj)
+        return Transformed(lenses.bind(input).pos.set(pos), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
@@ -446,8 +447,8 @@ class PosUpdate(eqx.Module):
         shift, scale = self.params(input)
 
         pos = input.pos - input.com
-        new, ldj = unpack(Affine(shift, scale).inverse(pos))
-        new = new + input.com
+        pos, ldj = unpack(Affine(shift, scale).inverse(pos))
+        pos = pos + input.com
 
         ldj = jnp.sum(ldj)
         # params = self.params(input)
@@ -455,7 +456,7 @@ class PosUpdate(eqx.Module):
         #     VectorizedTransform(FullAffine(params)).inverse(input.pos)
         #     # VectorizedTransform(FullAffine(params)).inverse(input.pos)
         # )
-        return Transformed(lenses.bind(input).pos.set(new), ldj)
+        return Transformed(lenses.bind(input).pos.set(pos), ldj)
 
 
 def log_cosh(x):

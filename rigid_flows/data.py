@@ -59,6 +59,7 @@ class AugmentedData:
     """Data augmented with auxilaries and quaternion signs."""
 
     pos: Array
+    com: Array
     aux: Array
     sign: Array
     box: SimulationBox

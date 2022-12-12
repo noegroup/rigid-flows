@@ -155,9 +155,9 @@ class TransformerStack(eqx.Module):
                 eqx.nn.Linear(num_inp * 16, num_hidden, key=next(chain)),
                 eqx.nn.LayerNorm((num_hidden,), elementwise_affine=True),
                 eqx.nn.Lambda(jax.nn.leaky_relu),
-                # eqx.nn.Linear(num_hidden, num_hidden, key=next(chain)),
-                # eqx.nn.LayerNorm((num_hidden,), elementwise_affine=True),
-                # eqx.nn.Lambda(jax.nn.silu),
+                eqx.nn.Linear(num_hidden, num_hidden, key=next(chain)),
+                eqx.nn.LayerNorm((num_hidden,), elementwise_affine=True),
+                eqx.nn.Lambda(jax.nn.leaky_relu),
                 eqx.nn.Linear(num_hidden, num_out * 16, key=next(chain)),
             ]
         )

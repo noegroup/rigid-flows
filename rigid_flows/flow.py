@@ -104,6 +104,7 @@ class State:
 
     rot: Array
     pos: Array
+    com: Array
     ics: InternalCoordinates
     aux: Array
     box: SimulationBox
@@ -199,8 +200,8 @@ class QuatUpdate(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         self.net = TransformerStack(
-            # num_inp=auxiliary_shape[-1] + num_pos,
-            num_inp=auxiliary_shape[-1] + num_pos * 2,
+            num_inp=auxiliary_shape[-1] + num_pos,
+            # num_inp=auxiliary_shape[-1] + num_pos * 2,
             num_out=4 * 4 + 4,  # num_rot,
             num_heads=num_heads,
             num_dims=num_dims,
@@ -221,8 +222,8 @@ class QuatUpdate(eqx.Module):
         aux = input.aux
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
-        # feats = jnp.concatenate([aux, input.pos], axis=-1)
-        feats = jnp.concatenate([aux, input.pos[..., 0], input.pos[..., 1]])
+        feats = jnp.concatenate([aux, input.pos], axis=-1)
+        # feats = jnp.concatenate([aux, input.pos[..., 0], input.pos[..., 1]])
         out = self.net(feats) * 1e-1
 
         mat, reflection = jnp.split(out, (16,), -1)  # type: ignore
@@ -294,8 +295,8 @@ class AuxUpdate(eqx.Module):
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.auxiliary_shape = auxiliary_shape
         self.net = TransformerStack(
-            # num_inp=num_dims + num_pos,
-            num_inp=num_dims + num_pos * 2,
+            num_inp=num_dims + num_pos,
+            # num_inp=num_dims + num_pos * 2,
             num_out=2 * auxiliary_shape[-1],
             num_heads=num_heads,
             num_dims=num_dims,
@@ -314,13 +315,13 @@ class AuxUpdate(eqx.Module):
         Returns:
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
-        # feats = jnp.concatenate(
-        #     [input.pos, self.symmetrizer(input.rot)], axis=-1
-        # )
         feats = jnp.concatenate(
-            [input.pos[..., 0], input.pos[..., 1], self.symmetrizer(input.rot)],
-            axis=-1,
+            [input.pos, self.symmetrizer(input.rot)], axis=-1
         )
+        # feats = jnp.concatenate(
+        #     [input.pos[..., 0], input.pos[..., 1], self.symmetrizer(input.rot)],
+        #     axis=-1,
+        # )
         out = self.net(feats)
         out = out.reshape(input.aux.shape[0], -1)
         shift, scale = jnp.split(out, 2, axis=-1)
@@ -399,12 +400,12 @@ class PosUpdate(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
         out = self.net(feats)
-        out = out.reshape(input.pos.shape)
-        norm = norm = jnp.sqrt(1e-12 + jnp.square(out)).sum(
-            axis=-1, keepdims=True
-        )
-        reflection = out / (1.0 + norm) * 0.99
-        return reflection
+        # out = out.reshape(input.pos.shape)
+        # norm = norm = jnp.sqrt(1e-12 + jnp.square(out)).sum(
+        #     axis=-1, keepdims=True
+        # )
+        # reflection = out / (1.0 + norm) * 0.99
+        # return reflection
         out = out.reshape(input.pos.shape[0], -1)
         out = out * 1e-2
         shift, scale = jnp.split(out, 2, axis=-1)
@@ -413,41 +414,41 @@ class PosUpdate(eqx.Module):
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        reflection = self.params(input)
-        new, ldj = unpack(
-            VectorizedTransform(
-                VectorizedTransform(Moebius(reflection))
-            ).forward(input.pos)
-        )
-        return Transformed(lenses.bind(input).pos.set(new), ldj)
-        # shift, scale = self.params(input)
-        # new, ldj = unpack(Affine(shift, scale).forward(input.pos))
-        # ldj = jnp.sum(ldj)
-        # # params = self.params(input)
-        # # new, ldj = unpack(
-        # #     VectorizedTransform(FullAffine(params)).forward(input.pos)
-        # #     # VectorizedTransform(FullAffine(params)).forward(input.pos)
-        # # )
+        # reflection = self.params(input)
+        # new, ldj = unpack(
+        #     VectorizedTransform(
+        #         VectorizedTransform(Moebius(reflection))
+        #     ).forward(input.pos)
+        # )
         # return Transformed(lenses.bind(input).pos.set(new), ldj)
+        shift, scale = self.params(input)
+        new, ldj = unpack(Affine(shift, scale).forward(input.pos))
+        ldj = jnp.sum(ldj)
+        # params = self.params(input)
+        # new, ldj = unpack(
+        #     VectorizedTransform(FullAffine(params)).forward(input.pos)
+        #     # VectorizedTransform(FullAffine(params)).forward(input.pos)
+        # )
+        return Transformed(lenses.bind(input).pos.set(new), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        reflection = self.params(input)
-        new, ldj = unpack(
-            VectorizedTransform(
-                VectorizedTransform(Moebius(reflection))
-            ).inverse(input.pos)
-        )
-        return Transformed(lenses.bind(input).pos.set(new), ldj)
-        # shift, scale = self.params(input)
-        # new, ldj = unpack(Affine(shift, scale).inverse(input.pos))
-        # ldj = jnp.sum(ldj)
-        # # params = self.params(input)
-        # # new, ldj = unpack(
-        # #     VectorizedTransform(FullAffine(params)).inverse(input.pos)
-        # #     # VectorizedTransform(FullAffine(params)).inverse(input.pos)
-        # # )
+        # reflection = self.params(input)
+        # new, ldj = unpack(
+        #     VectorizedTransform(
+        #         VectorizedTransform(Moebius(reflection))
+        #     ).inverse(input.pos)
+        # )
         # return Transformed(lenses.bind(input).pos.set(new), ldj)
+        shift, scale = self.params(input)
+        new, ldj = unpack(Affine(shift, scale).inverse(input.pos))
+        ldj = jnp.sum(ldj)
+        # params = self.params(input)
+        # new, ldj = unpack(
+        #     VectorizedTransform(FullAffine(params)).inverse(input.pos)
+        #     # VectorizedTransform(FullAffine(params)).inverse(input.pos)
+        # )
+        return Transformed(lenses.bind(input).pos.set(new), ldj)
 
 
 def log_cosh(x):
@@ -465,10 +466,10 @@ def tanh_transform(
 def atanh_transform(
     x,
 ):
-    x = jnp.clip(x, -1.0 + 1e-4, 1.0 - 1e-4)
+    x = jnp.clip(x, -1.0 + 1e-6, 1.0 - 1e-6)
     y = jnp.arctanh(x)
-    ldj = jnp.log(1.0 / (1.0 - jnp.square(x)))
-    # ldj = 2 * log_cosh(y)
+    # ldj = jnp.log(1.0 / (1.0 - jnp.square(x)))
+    ldj = 2 * log_cosh(y)
     return y, jnp.sum(ldj)
 
 
@@ -519,8 +520,8 @@ class DisplacementEncoder(eqx.Module):
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.net = TransformerStack(
             num_inp=auxiliary_shape[-1] + num_dims,
-            # num_out=num_pos,
-            num_out=1,
+            num_out=num_pos,
+            # num_out=1,
             num_heads=num_heads,
             num_dims=num_dims,
             num_hidden=num_hidden,
@@ -541,36 +542,38 @@ class DisplacementEncoder(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
         out = self.net(feats) * 1e-1
-        out = jnp.tanh(out) * jnp.pi
-        center = jax.vmap(jax.vmap(geom.rotmat2d))(out)
-        # center = out.reshape(input.pos.shape)
+        # out = jnp.tanh(out) * jnp.pi
+        # center = jax.vmap(jax.vmap(geom.rotmat2d))(out)
+        center = out.reshape(input.pos.shape)
         # center = jax.nn.sigmoid(center) * input.box.size
         return center
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
         center = self.params(input)
-        pos = jnp.einsum("...i, ...ij -> ...j", input.pos, center)
+        # pos = jnp.einsum("...i, ...ij -> ...j", input.pos, center)
         ldj = jnp.zeros(())
-        return Transformed(lenses.bind(input).pos.set(pos), ldj)
+        # return Transformed(lenses.bind(input).pos.set(pos), ldj)
+        diff = input.pos - center
         # diff = geom.Torus(input.box.size).tangent(center, input.pos - center)
         # diff = diff / input.box.size * 2
         # diff, ldj = unpack(VectorizedTransform(AtanhTransform()).forward(diff))
-        # return Transformed(lenses.bind(input).pos.set(diff), ldj)
+        return Transformed(lenses.bind(input).pos.set(diff), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
         center = self.params(input)
-        center = self.params(input)
-        pos = jnp.einsum("...i, ...ji -> ...j", input.pos, center)
+        # pos = jnp.einsum("...i, ...ji -> ...j", input.pos, center)
         ldj = jnp.zeros(())
-        return Transformed(lenses.bind(input).pos.set(pos), ldj)
+        # return Transformed(lenses.bind(input).pos.set(pos), ldj)
         # diff, ldj = unpack(
         #     VectorizedTransform(AtanhTransform()).inverse(input.pos)
         # )
         # diff = diff * input.box.size / 2
+        # diff = input.pos
         # pos = geom.Torus(input.box.size).shift(center, diff)
-        # return Transformed(lenses.bind(input).pos.set(pos), ldj)
+        pos = input.pos + center
+        return Transformed(lenses.bind(input).pos.set(pos), ldj)
 
 
 @pytree_dataclass(frozen=True)
@@ -582,29 +585,31 @@ class InitialTransform:
             VectorizedTransform(RigidTransform()).forward(input.pos)
         )
         rigid = lenses.bind(rigid).rot.set(rigid.rot * input.sign)
-        # pos = rigid.pos
-        pos = (rigid.pos % input.box.size) / input.box.size
-        pos = pos * (2 * jnp.pi) - jnp.pi
-        pos = jnp.stack(
-            [
-                jnp.cos(pos),
-                jnp.sin(pos),
-            ],
-            axis=-1,
-        )
+        pos = rigid.pos
+        # pos = (rigid.pos % input.box.size) / input.box.size
+        # pos = pos * (2 * jnp.pi) - jnp.pi
+        # pos = jnp.stack(
+        #     [
+        #         jnp.cos(pos),
+        #         jnp.sin(pos),
+        #     ],
+        #     axis=-1,
+        # )
 
-        state = State(rigid.rot, pos, rigid.ics, input.aux, input.box)
+        state = State(
+            rigid.rot, pos, input.com, rigid.ics, input.aux, input.box
+        )
         return Transformed(state, ldj)
 
     def inverse(self, input: State) -> Transformed[AugmentedData]:
-        # pos = input.pos
-        pos = jnp.arctan2(input.pos[..., 1], input.pos[..., 0])
-        pos = (pos + jnp.pi) / (2 * jnp.pi)
-        pos = pos * input.box.size
+        pos = input.pos
+        # pos = jnp.arctan2(input.pos[..., 1], input.pos[..., 0])
+        # pos = (pos + jnp.pi) / (2 * jnp.pi)
+        # pos = pos * input.box.size
         rigid = jax.vmap(RigidRepresentation)(input.rot, pos)
         pos, ldj = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))
         sign = jnp.sign(input.rot[:, (0,)])
-        data = AugmentedData(pos, input.aux, sign, input.box)
+        data = AugmentedData(pos, input.com, input.aux, sign, input.box)
         return Transformed(data, ldj)
 
 

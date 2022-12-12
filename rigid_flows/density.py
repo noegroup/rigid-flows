@@ -34,10 +34,10 @@ class BaseDensity(DensityModel[State]):
         box: SimulationBox,
         rot_modes: Array,
         rot_concentration: Array,
-        # pos_means: Array,
-        # pos_stds: Array,
-        pos_modes: Array,
-        pos_concentration,
+        pos_means: Array,
+        pos_stds: Array,
+        # pos_modes: Array,
+        # pos_concentration,
         aux_means: Array,
         aux_stds: Array,
     ):
@@ -45,10 +45,13 @@ class BaseDensity(DensityModel[State]):
         self.rot_model = tfp.distributions.VonMisesFisher(
             rot_modes, rot_concentration
         )
-        # self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
-        self.pos_model = tfp.distributions.VonMisesFisher(
-            pos_modes, pos_concentration
-        )
+        self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        # self.pos_model = tfp.distributions.VonMisesFisher(
+        #     pos_modes, pos_concentration
+        # )
+        com_means = jnp.zeros((3,))
+        com_stds = jnp.ones((3,))
+        self.com_model = tfp.distributions.Normal(com_means, com_stds)
         self.aux_model = tfp.distributions.Normal(aux_means, aux_stds)
 
     def potential(self, inp: State) -> Array:
@@ -71,6 +74,7 @@ class BaseDensity(DensityModel[State]):
             axis=0,
         ).sum()
         pos_prob = self.pos_model.log_prob(inp.pos).sum()
+        com_prob = self.com_model.log_prob(inp.com).sum()
         aux_prob = self.aux_model.log_prob(inp.aux).sum()
         return -(rot_prob + aux_prob + pos_prob)
 
@@ -91,9 +95,10 @@ class BaseDensity(DensityModel[State]):
             jax.random.normal(next(chain), shape=(rot.shape[0], 1))
         )
         pos = self.pos_model.sample(seed=next(chain))
+        com = self.com_model.sample(seed=next(chain))
         ics = InternalCoordinates()
         aux = self.aux_model.sample(seed=next(chain))
-        state = State(rot, pos, ics, aux, self.box)
+        state = State(rot, pos, com, ics, aux, self.box)
         log_prob = self.potential(state)
         return Transformed(state, log_prob)
 
@@ -112,14 +117,19 @@ class BaseDensity(DensityModel[State]):
             ),
             rot_concentration=base_specs.rot_concentration
             * jnp.ones((system_specs.num_molecules,)),
-            # pos_means=jnp.zeros((system_specs.num_molecules, 3,)),
-            # pos_stds=jnp.ones((system_specs.num_molecules, 3)),
-            pos_modes=jnp.tile(
-                jnp.array([1.0, 0.0])[None, None],
-                (system_specs.num_molecules, 3, 1),
+            pos_means=jnp.zeros(
+                (
+                    system_specs.num_molecules,
+                    3,
+                )
             ),
-            pos_concentration=base_specs.pos_concentration
-            * jnp.ones((system_specs.num_molecules, 3)),
+            pos_stds=jnp.ones((system_specs.num_molecules, 3)),
+            # pos_modes=jnp.tile(
+            #     jnp.array([1.0, 0.0])[None, None],
+            #     (system_specs.num_molecules, 3, 1),
+            # ),
+            # pos_concentration=base_specs.pos_concentration
+            # * jnp.ones((system_specs.num_molecules, 3)),
             aux_means=jnp.zeros(auxiliary_shape),
             aux_stds=jnp.ones(auxiliary_shape),
         )
@@ -166,7 +176,12 @@ class TargetDensity(DensityModel[AugmentedData]):
     ):
         aux_means = jnp.zeros(auxiliary_shape)
         aux_stds = jnp.ones(auxiliary_shape)
+
+        com_means = jnp.zeros((3,))
+        com_stds = jnp.ones((3,)) * 1e-2
+
         self.aux_model = tfp.distributions.Normal(aux_means, aux_stds)
+        self.com_model = tfp.distributions.Normal(com_means, com_stds)
         self.sys_specs = sys_specs
         self.model = model
         self.data = data
@@ -192,6 +207,7 @@ class TargetDensity(DensityModel[AugmentedData]):
             Array: the energy of the state
 
         """
+        com_prob = self.com_model.log_prob(inp.com).sum()
         aux_prob = self.aux_model.log_prob(inp.aux).sum()
 
         if self.sys_specs.fixed_box:
@@ -212,7 +228,7 @@ class TargetDensity(DensityModel[AugmentedData]):
                 energy = cutoff_potential(energy, self.data.pos[0], self.cutoff)
 
         pot = energy(inp.pos)
-        return -aux_prob + pot
+        return -aux_prob + pot - com_prob
 
     def sample(self, key: KeyArray) -> Transformed[AugmentedData]:
         """Samples from the target (data) distribution.
@@ -243,14 +259,20 @@ class TargetDensity(DensityModel[AugmentedData]):
                 force = self.data.force[idx]
             else:
                 force = None
+
             aux = self.aux_model.sample(seed=next(chain))
+            com = self.com_model.sample(seed=next(chain))
+
+            pos = pos - pos.mean(axis=(0, 1))[None, None]
+            pos = pos + com[None, None]
+
             sign = jnp.sign(
                 jax.random.normal(
                     next(chain), shape=(self.sys_specs.num_molecules, 1)
                 )
             )
             return Transformed(
-                AugmentedData(pos, aux, sign, box, force), energy
+                AugmentedData(pos, com, aux, sign, box, force), energy
             )
 
     @staticmethod

@@ -511,24 +511,24 @@ def report_model(
 
     # plot oxygen histograms
     if specs.plot_oxygens:
-        # data_pos = jax.vmap(InitialTransform().forward)(
-        #     data_samples.obj
-        # ).obj.pos
-        data_pos = (
-            data_samples.obj.pos.reshape(
-                data_samples.obj.pos.shape[0], -1, 4, 3
-            )[:, :, 0]
-            % target.box.size
-        )
-        # model_pos = jax.vmap(InitialTransform().forward)(
-        #     model_samples.obj
-        # ).obj.pos
-        model_pos = (
-            model_samples.obj.pos.reshape(
-                model_samples.obj.pos.shape[0], -1, 4, 3
-            )[:, :, 0]
-            % target.box.size
-        )
+        data_pos = jax.vmap(InitialTransform().forward)(
+            data_samples.obj
+        ).obj.pos
+        # data_pos = (
+        #     data_samples.obj.pos.reshape(
+        #         data_samples.obj.pos.shape[0], -1, 4, 3
+        #     )[:, :, 0]
+        #     % target.box.size
+        # )
+        model_pos = jax.vmap(InitialTransform().forward)(
+            model_samples.obj
+        ).obj.pos
+        # model_pos = (
+        #     model_samples.obj.pos.reshape(
+        #         model_samples.obj.pos.shape[0], -1, 4, 3
+        #     )[:, :, 0]
+        #     % target.box.size
+        # )
         logging.info(f"plotting oxygens")
         fig = plot_oxygen_positions(model_pos, data_pos, target.box)
         write_figure_to_tensorboard(f"{scope}/plots/oxygens", fig, tot_iter)

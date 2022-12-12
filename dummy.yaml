@@ -86,6 +86,6 @@ train:
     target_learning_rate: 0.001
     weight_nll: 1.0
     weight_fm: 0.0
-    weight_fe: 0.0
+    weight_fe: 0.1
     fm_aggregation: mse
     num_samples: 128

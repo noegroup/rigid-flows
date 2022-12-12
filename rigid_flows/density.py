@@ -151,6 +151,7 @@ def cutoff_potential(
 
         out = jnp.where(gnorm > threshold, approx, original)
         grad = jnp.where(gnorm > threshold, grad_approx, grad)
+
         return out, grad
 
     def eval_bwd(g_inp, g_out):
@@ -178,7 +179,7 @@ class TargetDensity(DensityModel[AugmentedData]):
         aux_stds = jnp.ones(auxiliary_shape)
 
         com_means = jnp.zeros((3,))
-        com_stds = jnp.ones((3,)) * 1e-2
+        com_stds = jnp.ones((3,))
 
         self.aux_model = tfp.distributions.Normal(aux_means, aux_stds)
         self.com_model = tfp.distributions.Normal(com_means, com_stds)

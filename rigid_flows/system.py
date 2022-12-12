@@ -165,9 +165,9 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
         energy, force = compute_energy_and_forces(pos, box, has_batch_dim)
         return energy, force
 
-    def eval_bwd(res, box, has_batch_dim, g):
+    def eval_bwd(_1, _2, res, g):
         force = res
-        return -g * force, jnp.zeros_like(box)
+        return (-g * force,)
 
     @partial(jax.custom_vjp, nondiff_argnums=(1, 2))
     def eval(pos: Array, box: Array | None, has_batch_dim: bool):

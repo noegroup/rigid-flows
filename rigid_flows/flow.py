@@ -585,7 +585,7 @@ class InitialTransform:
             VectorizedTransform(RigidTransform()).forward(input.pos)
         )
         rigid = lenses.bind(rigid).rot.set(rigid.rot * input.sign)
-        pos = rigid.pos
+        pos = rigid.pos - input.com
         # pos = (rigid.pos % input.box.size) / input.box.size
         # pos = pos * (2 * jnp.pi) - jnp.pi
         # pos = jnp.stack(
@@ -603,6 +603,7 @@ class InitialTransform:
 
     def inverse(self, input: State) -> Transformed[AugmentedData]:
         pos = input.pos
+        pos = pos + input.com
         # pos = jnp.arctan2(input.pos[..., 1], input.pos[..., 0])
         # pos = (pos + jnp.pi) / (2 * jnp.pi)
         # pos = pos * input.box.size

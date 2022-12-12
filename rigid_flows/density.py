@@ -139,7 +139,7 @@ def cutoff_potential(
     potential: Callable[[Array], Array], reference: Array, threshold: float
 ):
     def approximate_potential(inp):
-        return 0.5 * jnp.square(inp - reference).sum()
+        return 0.5 * jnp.square(inp - reference.reshape(inp.shape)).sum()
 
     def eval_fwd(inp):
         original, grad = jax.value_and_grad(potential)(inp)

@@ -256,16 +256,18 @@ class TargetDensity(DensityModel[AugmentedData]):
             box = SimulationBox(self.data.box[idx])
             pos = self.data.pos[idx].reshape(-1, 4, 3)
             energy = self.data.energy[idx]
-            if self.data.force is not None:
-                force = self.data.force[idx]
-            else:
-                force = None
 
             aux = self.aux_model.sample(seed=next(chain))
             com = self.com_model.sample(seed=next(chain))
 
             pos = pos - pos.mean(axis=(0, 1))[None, None]
             pos = pos + com[None, None]
+
+            if self.data.force is not None:
+                force = self.data.force[idx]
+                force += jax.grad(self.com_model.log_prob)(com)
+            else:
+                force = None
 
             sign = jnp.sign(
                 jax.random.normal(

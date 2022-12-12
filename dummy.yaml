@@ -72,7 +72,7 @@ system:
   num_molecules: 16
   temperature: 250
   ice_type: Ih
-  recompute_forces: false
+  recompute_forces: true
   fixed_box: true
 
 
@@ -83,9 +83,9 @@ train:
   - num_epochs: 2
     num_iters_per_epoch: 1000
     init_learning_rate: 0.001
-    target_learning_rate: 0.001
+    target_learning_rate: 0.0005
     weight_nll: 1.0
-    weight_fm: 0.0
-    weight_fe: 0.1
-    fm_aggregation: mse
+    weight_fm: 0.001
+    weight_fe: 0.0
+    fm_aggregation: huber
     num_samples: 128

@@ -220,8 +220,9 @@ class QuatUpdate(eqx.Module):
             Array: the parameter (reflection) of the double moebius transform
         """
         aux = input.aux
+        pos = input.pos - input.com
         if len(aux.shape) == 1:
-            aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
+            aux = jnp.tile(aux[None], (pos.shape[0], 1))
         feats = jnp.concatenate([aux, input.pos], axis=-1)
         # feats = jnp.concatenate([aux, input.pos[..., 0], input.pos[..., 1]])
         out = self.net(feats) * 1e-1
@@ -315,9 +316,8 @@ class AuxUpdate(eqx.Module):
         Returns:
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
-        feats = jnp.concatenate(
-            [input.pos, self.symmetrizer(input.rot)], axis=-1
-        )
+        pos = input.pos - input.com
+        feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
         # feats = jnp.concatenate(
         #     [input.pos[..., 0], input.pos[..., 1], self.symmetrizer(input.rot)],
         #     axis=-1,
@@ -422,7 +422,10 @@ class PosUpdate(eqx.Module):
         # )
         # return Transformed(lenses.bind(input).pos.set(new), ldj)
         shift, scale = self.params(input)
-        new, ldj = unpack(Affine(shift, scale).forward(input.pos))
+
+        pos = input.pos - input.com
+        new, ldj = unpack(Affine(shift, scale).forward(pos))
+        new = input.pos + input.com
         ldj = jnp.sum(ldj)
         # params = self.params(input)
         # new, ldj = unpack(
@@ -441,7 +444,11 @@ class PosUpdate(eqx.Module):
         # )
         # return Transformed(lenses.bind(input).pos.set(new), ldj)
         shift, scale = self.params(input)
+
+        pos = input.pos - input.com
         new, ldj = unpack(Affine(shift, scale).inverse(input.pos))
+        new = input.pos + input.com
+
         ldj = jnp.sum(ldj)
         # params = self.params(input)
         # new, ldj = unpack(
@@ -585,7 +592,7 @@ class InitialTransform:
             VectorizedTransform(RigidTransform()).forward(input.pos)
         )
         rigid = lenses.bind(rigid).rot.set(rigid.rot * input.sign)
-        pos = rigid.pos - input.com
+        # pos = rigid.pos - input.com
         # pos = (rigid.pos % input.box.size) / input.box.size
         # pos = pos * (2 * jnp.pi) - jnp.pi
         # pos = jnp.stack(
@@ -595,7 +602,7 @@ class InitialTransform:
         #     ],
         #     axis=-1,
         # )
-
+        pos = rigid.pos
         state = State(
             rigid.rot, pos, input.com, rigid.ics, input.aux, input.box
         )
@@ -603,7 +610,7 @@ class InitialTransform:
 
     def inverse(self, input: State) -> Transformed[AugmentedData]:
         pos = input.pos
-        pos = pos + input.com
+        # pos = pos + input.com
         # pos = jnp.arctan2(input.pos[..., 1], input.pos[..., 0])
         # pos = (pos + jnp.pi) / (2 * jnp.pi)
         # pos = pos * input.box.size

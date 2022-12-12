@@ -265,7 +265,9 @@ class TargetDensity(DensityModel[AugmentedData]):
 
             if self.data.force is not None:
                 force = self.data.force[idx]
-                force += jax.grad(self.com_model.log_prob)(com)
+                force += jax.grad(lambda x: self.com_model.log_prob(x).sum())(
+                    com
+                )
             else:
                 force = None
 

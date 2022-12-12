@@ -16,7 +16,7 @@ reporting:
 model:
 
   # set if model is trained with warm start
-  pretrained_model_path: none 
+  pretrained_model_path: null 
 
   # shape of the auxiliary variables
   auxiliary_shape: [16, 3]

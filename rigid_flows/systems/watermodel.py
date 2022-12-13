@@ -70,7 +70,6 @@ class WaterModel:
         barostat=None,
         external_field=None,
     ):
-        n_atoms = len(positions)
         if water_type not in ["tip3p", "tip4pew", "tip5p", "spce"]:
             print(
                 f"+++ WARNING: Unknown water_type `{water_type}` +++",
@@ -92,6 +91,7 @@ class WaterModel:
         topology = mdtraj_topology.to_openmm()
         topology.setPeriodicBoxVectors(box)
 
+        n_atoms = topology.getNumAtoms()
         if nonbondedCutoff > np.diagonal(box).min() / 2:
             nonbondedCutoff = np.diagonal(box).min() / 2
             print(
@@ -128,6 +128,9 @@ class WaterModel:
             np.arange(0, n_atoms, n_sites), np.arange(0, n_atoms, n_sites)
         )
         self.system.addForce(OOforce)
+        for i in range(system.getNumParticles()):
+            OOforce.addParticle([])
+        print(OOforce.getNumParticles())
 
         self.topology = topology
         self.mdtraj_topology = mdtraj_topology

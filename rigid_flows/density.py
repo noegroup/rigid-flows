@@ -47,12 +47,14 @@ class PositionPrior(eqx.Module):
 
     def sample(self, *, seed: KeyArray):
         r = jax.random.normal(seed, shape=(math.prod(self.mean.shape),))
-        r = (self.cov_sqrt.T @ r + self.mean).reshape(self.mean.shape)
+        r = (self.cov_sqrt.T @ r).reshape(self.mean.shape)
+        r = r + self.mean
         return r
 
     def log_prob(self, x: Array):
         x = x.reshape(self.mean.shape)
-        return -0.5 * jnp.square((x - self.mean) @ self.inv_cov_sqrt).sum()
+        diff = (x - self.mean).reshape(-1)
+        return -0.5 * jnp.square(diff @ self.inv_cov_sqrt).sum()
 
 
 class DensityModel(Protocol[T]):
@@ -235,7 +237,7 @@ class TargetDensity(DensityModel[AugmentedData]):
     def box(self) -> SimulationBox:
         if self.data is None:
             raise ValueError("Data not loaded.")
-        return SimulationBox(self.data.box[0])
+        return SimulationBox(jnp.diag(self.model.model.box))
 
     def potential(self, inp: AugmentedData) -> Array:
         """Evaluate the target density for a state

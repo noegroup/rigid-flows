@@ -1,11 +1,15 @@
+import math
 from collections.abc import Callable
 from functools import partial
 from typing import Protocol, TypeVar
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import tensorflow_probability.substrates.jax as tfp  # type: ignore
 from jax import Array
+from jax_dataclasses import pytree_dataclass
 
 from flox.flow import Transformed
 from flox.util import key_chain
@@ -18,6 +22,37 @@ from .system import OpenMMEnergyModel, SimulationBox, wrap_openmm_model
 T = TypeVar("T")
 
 KeyArray = Array | jax.random.PRNGKeyArray
+
+
+class PositionPrior(eqx.Module):
+
+    box: SimulationBox
+
+    mean: Array
+    cov_sqrt: Array
+    inv_cov_sqrt: Array
+
+    def __init__(self, data: Data):
+        self.box = SimulationBox(data.box)
+        oxy = data.pos.reshape(data.pos.shape[0], -1, 4, 3)[:, :, 0]
+
+        r = oxy.reshape(oxy.shape[0], -1)
+        self.mean = jnp.mean(r, axis=0).reshape(oxy.shape[1:])
+
+        C = jnp.cov(r.T)
+        D, U = jnp.linalg.eigh(C)
+        D = jnp.sqrt(D)
+        self.cov_sqrt = jnp.diag(D) @ U.T
+        self.inv_cov_sqrt = U @ jnp.diag(1.0 / (D + 1e-6))
+
+    def sample(self, *, seed: KeyArray):
+        r = jax.random.normal(seed, shape=(math.prod(self.mean.shape),))
+        r = (self.cov_sqrt.T @ r + self.mean).reshape(self.mean.shape)
+        return r
+
+    def log_prob(self, x: Array):
+        x = x.reshape(self.mean.shape)
+        return -0.5 * jnp.square((x - self.mean) @ self.inv_cov_sqrt).sum()
 
 
 class DensityModel(Protocol[T]):
@@ -34,8 +69,9 @@ class BaseDensity(DensityModel[State]):
         box: SimulationBox,
         rot_modes: Array,
         rot_concentration: Array,
-        pos_means: Array,
-        pos_stds: Array,
+        prior: PositionPrior,
+        # pos_means: Array,
+        # pos_stds: Array,
         # pos_modes: Array,
         # pos_concentration,
         aux_means: Array,
@@ -45,7 +81,8 @@ class BaseDensity(DensityModel[State]):
         self.rot_model = tfp.distributions.VonMisesFisher(
             rot_modes, rot_concentration
         )
-        self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        # self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        self.pos_model = prior
         # self.pos_model = tfp.distributions.VonMisesFisher(
         #     pos_modes, pos_concentration
         # )
@@ -106,6 +143,7 @@ class BaseDensity(DensityModel[State]):
     def from_specs(
         system_specs: SystemSpecification,
         base_specs: BaseSpecification,
+        prior: PositionPrior,
         box: SimulationBox,
         auxiliary_shape: tuple[int, ...],
     ):
@@ -117,13 +155,14 @@ class BaseDensity(DensityModel[State]):
             ),
             rot_concentration=base_specs.rot_concentration
             * jnp.ones((system_specs.num_molecules,)),
-            pos_means=jnp.zeros(
-                (
-                    system_specs.num_molecules,
-                    3,
-                )
-            ),
-            pos_stds=jnp.ones((system_specs.num_molecules, 3)),
+            prior=prior,
+            # pos_means=jnp.zeros(
+            #     (
+            #         system_specs.num_molecules,
+            #         3,
+            #     )
+            # ),
+            # pos_stds=jnp.ones((system_specs.num_molecules, 3)),
             # pos_modes=jnp.tile(
             #     jnp.array([1.0, 0.0])[None, None],
             #     (system_specs.num_molecules, 3, 1),
@@ -260,7 +299,7 @@ class TargetDensity(DensityModel[AugmentedData]):
             aux = self.aux_model.sample(seed=next(chain))
             com = self.com_model.sample(seed=next(chain))
 
-            pos = pos - pos.mean(axis=(0, 1))
+            # pos = pos - pos.mean(axis=(0, 1))
 
             if self.data.force is not None:
                 force = self.data.force[idx]
@@ -289,6 +328,9 @@ class TargetDensity(DensityModel[AugmentedData]):
         model = OpenMMEnergyModel.from_specs(sys_specs)
         if sys_specs.recompute_forces:
             data = data.recompute_forces(model)
+        if sys_specs.store_forces and sys_specs.forces_path:
+            assert data.force is not None
+            np.savez(sys_specs.forces_path, np.array(data.force))
 
         return TargetDensity(
             auxiliary_shape=auxiliary_shape,

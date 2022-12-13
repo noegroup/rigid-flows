@@ -8,7 +8,12 @@ from typing import cast
 import equinox as eqx
 import tensorflow as tf  # type: ignore
 from rigid_flows.data import AugmentedData
-from rigid_flows.density import BaseDensity, KeyArray, TargetDensity
+from rigid_flows.density import (
+    BaseDensity,
+    KeyArray,
+    PositionPrior,
+    TargetDensity,
+)
 from rigid_flows.flow import State, build_flow
 from rigid_flows.reporting import Reporter, pretty_json
 from rigid_flows.specs import ExperimentSpecification
@@ -42,8 +47,14 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
     )
 
     logging.info(f"Setting up base density.")
+    assert target.data is not None
+    prior = PositionPrior(target.data)
     base = BaseDensity.from_specs(
-        specs.system, specs.model.base, target.box, specs.model.auxiliary_shape
+        specs.system,
+        specs.model.base,
+        prior,
+        target.box,
+        specs.model.auxiliary_shape,
     )
 
     logging.info(f"Setting up flow model.")

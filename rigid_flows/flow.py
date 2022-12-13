@@ -26,7 +26,11 @@ from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .nn import QuatEncoder, TransformerStack
-from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
+from .specs import (
+    CouplingSpecification,
+    FlowSpecification,
+    PreprocessingSpecification,
+)
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -215,7 +219,8 @@ class QuatUpdate(eqx.Module):
             Array: the parameter (reflection) of the double moebius transform
         """
         aux = input.aux
-        pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
+        # pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
+        pos = input.pos
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (pos.shape[0], 1))
         feats = jnp.concatenate([aux, input.pos], axis=-1)
@@ -311,7 +316,8 @@ class AuxUpdate(eqx.Module):
         Returns:
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
-        pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
+        # pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
+        pos = input.pos
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
         # feats = jnp.concatenate(
         #     [input.pos[..., 0], input.pos[..., 1], self.symmetrizer(input.rot)],
@@ -635,16 +641,16 @@ def _preprocess(
     return Pipe[AugmentedData, State](
         [
             InitialTransform(),
-            AuxUpdate(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.auxiliary_update),
-                key=next(chain),
-            ),
-            DisplacementEncoder(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.displacement_encoder),
-                key=next(chain),
-            ),
+            # AuxUpdate(
+            #     auxiliary_shape=auxiliary_shape,
+            #     **asdict(specs.auxiliary_update),
+            #     key=next(chain),
+            # ),
+            # DisplacementEncoder(
+            #     auxiliary_shape=auxiliary_shape,
+            #     **asdict(specs.displacement_encoder),
+            #     key=next(chain),
+            # ),
         ]
     )
 
@@ -681,11 +687,11 @@ def _coupling(
                 **asdict(specs.quaternion_update),
                 key=next(chain),
             ),
-            PosUpdate(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.position_update),
-                key=next(chain),
-            ),
+            # PosUpdate(
+            #     auxiliary_shape=auxiliary_shape,
+            #     **asdict(specs.position_update),
+            #     key=next(chain),
+            # ),
         ]
     return Pipe[State, State](blocks)
 

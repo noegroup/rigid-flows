@@ -70,6 +70,7 @@ class WaterModel:
         barostat=None,
         external_field=None,
     ):
+        n_atoms = len(positions)
         if water_type not in ["tip3p", "tip4pew", "tip5p", "spce"]:
             print(
                 f"+++ WARNING: Unknown water_type `{water_type}` +++",
@@ -98,7 +99,8 @@ class WaterModel:
                 file=stderr,
             )
 
-        ff = openmm.app.ForceField(water_type + ".xml")
+        # ff = openmm.app.ForceField(water_type + ".xml")
+        ff = openmm.app.ForceField("./test.xml")
         system = ff.createSystem(
             topology,
             nonbondedMethod=openmm.app.PME,
@@ -115,6 +117,18 @@ class WaterModel:
         forces["NonbondedForce"].setEwaldErrorTolerance(1e-4)
 
         self.system = system
+
+        # see https://github.com/openmm/openmm/blob/master/wrappers/python/openmm/app/data/tip4pew.xml
+        new_force = "select(step(r - 0.31966763734817505), 4*epsilon0*((sigma0/r)^12-(sigma0/r)^6), 10.0*r^2 + -48.80157470703125*r + 14.426800727844238)"  # TODO define a force
+        # OOforce = openmm.CustomNonbondedForce(f"{new_force}")
+        OOforce = openmm.CustomNonbondedForce(
+            f"-4*epsilon0*((sigma0/r)^12-(sigma0/r)^6)+{new_force}; sigma0=0.316435; epsilon0=0.680946"
+        )
+        OOforce.addInteractionGroup(
+            np.arange(0, n_atoms, n_sites), np.arange(0, n_atoms, n_sites)
+        )
+        self.system.addForce(OOforce)
+
         self.topology = topology
         self.mdtraj_topology = mdtraj_topology
 
@@ -272,25 +286,27 @@ class WaterModel:
             box = self._box
 
         if len(pos.squeeze().shape) == 2:
-            marker = 'o'
+            marker = "o"
             alpha = 1
         elif len(pos.squeeze().shape) == 3:
-            marker = '.'
+            marker = "."
             alpha = 0.05
         else:
-            raise ValueError('pos should be of shape (nframes, natoms, 3)')
+            raise ValueError("pos should be of shape (nframes, natoms, 3)")
         if pos.shape[-2] != self.n_atoms or pos.shape[-1] != 3:
-            raise ValueError('pos should be of shape (nframes, natoms, 3)')
+            raise ValueError("pos should be of shape (nframes, natoms, 3)")
 
         av_box = box.mean(axis=0) if len(box.shape) == 3 else box
         if av_box.shape != (3, 3):
-            raise ValueError('box should be a 3x3 matrix')
+            raise ValueError("box should be a 3x3 matrix")
 
         if toPBC:
             if self.is_box_orthorombic:
                 mypos = (pos / np.diagonal(av_box) % 1) * np.diagonal(av_box)
             else:
-                raise NotImplementedError('only available for fixed orthorombic box')
+                raise NotImplementedError(
+                    "only available for fixed orthorombic box"
+                )
         else:
             mypos = pos
 
@@ -298,39 +314,66 @@ class WaterModel:
         for i in range(3):
             ii = (i + 1) % 3
             iii = (i + 2) % 3
-            plt.subplot(1, 3, 1+i)
+            plt.subplot(1, 3, 1 + i)
 
-            #draw particles
-            plt.scatter(mypos[..., 1::self.n_sites, i], mypos[..., 1::self.n_sites, ii], marker=marker, alpha=alpha, c='gray')
-            plt.scatter(mypos[..., 2::self.n_sites, i], mypos[..., 2::self.n_sites, ii], marker=marker, alpha=alpha, c='gray')
-            plt.scatter(mypos[..., ::self.n_sites, i], mypos[..., ::self.n_sites, ii], marker=marker, alpha=alpha, c='r')
+            # draw particles
+            plt.scatter(
+                mypos[..., 1 :: self.n_sites, i],
+                mypos[..., 1 :: self.n_sites, ii],
+                marker=marker,  # type: ignore
+                alpha=alpha,
+                c="gray",
+            )
+            plt.scatter(
+                mypos[..., 2 :: self.n_sites, i],
+                mypos[..., 2 :: self.n_sites, ii],
+                marker=marker,  # type: ignore
+                alpha=alpha,
+                c="gray",
+            )
+            plt.scatter(
+                mypos[..., :: self.n_sites, i],
+                mypos[..., :: self.n_sites, ii],
+                marker=marker,  # type: ignore
+                alpha=alpha,
+                c="r",
+            )
 
-            #draw box
+            # draw box
             coord = [
                 [0, 0],
-                [av_box[i,i], av_box[i,ii]],
-                [av_box[i,i] + av_box[ii,i], av_box[i,ii] + av_box[ii,ii]],
-                [av_box[ii,i], av_box[ii,ii]],
-                [0, 0]
+                [av_box[i, i], av_box[i, ii]],
+                [av_box[i, i] + av_box[ii, i], av_box[i, ii] + av_box[ii, ii]],
+                [av_box[ii, i], av_box[ii, ii]],
+                [0, 0],
             ]
             xs, ys = zip(*coord)
-            plt.plot(xs, ys, 'k:')
+            plt.plot(xs, ys, "k:")
             if not self.is_box_orthorombic:
                 coord2 = [
                     coord[1],
-                    [coord[1][0] + av_box[iii,i], coord[1][1] + av_box[iii,ii]],
-                    [coord[2][0] + av_box[iii,i], coord[2][1] + av_box[iii,ii]],
-                    [coord[3][0] + av_box[iii,i], coord[3][1] + av_box[iii,ii]],
+                    [
+                        coord[1][0] + av_box[iii, i],
+                        coord[1][1] + av_box[iii, ii],
+                    ],
+                    [
+                        coord[2][0] + av_box[iii, i],
+                        coord[2][1] + av_box[iii, ii],
+                    ],
+                    [
+                        coord[3][0] + av_box[iii, i],
+                        coord[3][1] + av_box[iii, ii],
+                    ],
                     coord[3],
                 ]
                 xs, ys = zip(*coord2)
-                plt.plot(xs, ys, 'k:')
+                plt.plot(xs, ys, "k:")
                 coord = [coord[2], coord2[2]]
                 xs, ys = zip(*coord)
-                plt.plot(xs, ys, 'k:')
+                plt.plot(xs, ys, "k:")
 
-            plt.xlabel(f'x{i} [nm]')
-            plt.ylabel(f'x{ii} [nm]')
+            plt.xlabel(f"x{i} [nm]")
+            plt.ylabel(f"x{ii} [nm]")
             plt.gca().set_aspect(1)
         plt.show()
 
@@ -367,4 +410,3 @@ def plot_energy(ene):
     plt.xlabel("energy [kJ/mol]")
 
     plt.show()
-

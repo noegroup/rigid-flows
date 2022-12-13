@@ -73,6 +73,8 @@ system:
   temperature: 250
   ice_type: Ih
   recompute_forces: true
+  store_forces: null
+  forces_path: null
   fixed_box: true
 
 

@@ -90,6 +90,8 @@ class SystemSpecification:
     temperature: int
     ice_type: str
     recompute_forces: bool
+    store_forces: bool
+    forces_path: str | None
     fixed_box: bool
 
     def __str__(self) -> str:

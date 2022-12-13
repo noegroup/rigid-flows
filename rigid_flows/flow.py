@@ -42,11 +42,12 @@ AtomRepresentation = Float[Array, "... MOL 4 3"]
 
 @pytree_dataclass(frozen=True)
 class InternalCoordinates:
+#see https://github.com/openmm/openmm/blob/master/wrappers/python/openmm/app/data/tip4pew.xml
     d_OH1: Scalar = jnp.array(0.09572)
     d_OH2: Scalar = jnp.array(0.09572)
-    a_HOH: Scalar = jnp.array(104.52 * jnp.pi / 180)
+    a_HOH: Scalar = jnp.array(1.82421813418)
     d_OM: Scalar = jnp.array(0.0125)
-    a_OM: Scalar = jnp.array(52.259937 * jnp.pi / 180)
+    a_OM: Scalar = jnp.array(1.82421813418 / 2)
 
 
 @pytree_dataclass(frozen=True)

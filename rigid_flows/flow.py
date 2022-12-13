@@ -220,7 +220,8 @@ class QuatUpdate(eqx.Module):
         """
         aux = input.aux
         # pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
-        pos = input.pos
+        # pos = input.pos
+        pos = geom.Torus(input.box.size).projx(input.pos)
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (pos.shape[0], 1))
         feats = jnp.concatenate([aux, input.pos], axis=-1)
@@ -317,7 +318,7 @@ class AuxUpdate(eqx.Module):
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
         # pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
-        pos = input.pos
+        pos = geom.Torus(input.box.size).projx(input.pos)
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
         # feats = jnp.concatenate(
         #     [input.pos[..., 0], input.pos[..., 1], self.symmetrizer(input.rot)],
@@ -408,7 +409,7 @@ class PosUpdate(eqx.Module):
         # reflection = out / (1.0 + norm) * 0.99
         # return reflection
         out = out.reshape(input.pos.shape[0], -1)
-        out = out * 1e-1
+        out = out * 1e-3
         shift, scale = jnp.split(out, 2, axis=-1)
         return shift, scale
 
@@ -604,7 +605,8 @@ class InitialTransform:
             VectorizedTransform(RigidTransform()).forward(input.pos)
         )
         rigid = lenses.bind(rigid).rot.set(rigid.rot * input.sign)
-        pos = rigid.pos + input.com
+        # pos = rigid.pos + input.com
+        pos = rigid.pos
         state = State(rigid.rot, pos, rigid.ics, input.aux, input.box)
         return Transformed(state, ldj)
 
@@ -613,8 +615,9 @@ class InitialTransform:
         pos, ldj = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))
         sign = jnp.sign(input.rot[:, (0,)])
 
-        com = jnp.mean(pos, axis=(0, 1))
-        pos = pos - com[None, None]
+        # com = jnp.mean(pos, axis=(0, 1))
+        # pos = pos - com[None, None]
+        com = 0.0 * pos
         data = AugmentedData(pos, com, input.aux, sign, input.box)
         return Transformed(data, ldj)
 
@@ -687,11 +690,11 @@ def _coupling(
                 **asdict(specs.quaternion_update),
                 key=next(chain),
             ),
-            # PosUpdate(
-            #     auxiliary_shape=auxiliary_shape,
-            #     **asdict(specs.position_update),
-            #     key=next(chain),
-            # ),
+            PosUpdate(
+                auxiliary_shape=auxiliary_shape,
+                **asdict(specs.position_update),
+                key=next(chain),
+            ),
         ]
     return Pipe[State, State](blocks)
 

@@ -230,6 +230,7 @@ def cutoff_potential(
 class TargetDensity(DensityModel[AugmentedData]):
     def __init__(
         self,
+        prior: PositionPrior,
         auxiliary_shape: tuple[int, ...],
         sys_specs: SystemSpecification,
         model: OpenMMEnergyModel,
@@ -248,6 +249,7 @@ class TargetDensity(DensityModel[AugmentedData]):
         self.model = model
         self.data = data
         self.cutoff = cutoff_threshold
+        self.prior = prior
 
         # set simulation box
         if self.sys_specs.fixed_box:
@@ -316,6 +318,11 @@ class TargetDensity(DensityModel[AugmentedData]):
             )
             box = SimulationBox(self.data.box[idx])
             pos = self.data.pos[idx].reshape(-1, 4, 3)
+
+            pos = self.prior.mean[:, None] + geom.Torus(box.size).tangent(
+                pos, pos - self.prior.mean[:, None]
+            )
+
             energy = self.data.energy[idx]
 
             aux = self.aux_model.sample(seed=next(chain))
@@ -347,6 +354,7 @@ class TargetDensity(DensityModel[AugmentedData]):
         sys_specs: SystemSpecification,
     ):
         data = Data.from_specs(sys_specs)
+        prior = PositionPrior(data)
         model = OpenMMEnergyModel.from_specs(sys_specs)
         if sys_specs.recompute_forces:
             data = data.recompute_forces(model)
@@ -355,6 +363,7 @@ class TargetDensity(DensityModel[AugmentedData]):
             np.savez(sys_specs.forces_path, np.array(data.force))
 
         return TargetDensity(
+            prior=prior,
             auxiliary_shape=auxiliary_shape,
             sys_specs=sys_specs,
             model=model,

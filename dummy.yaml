@@ -16,7 +16,7 @@ reporting:
 model:
 
   # set if model is trained with warm start
-  pretrained_model_path: null 
+  pretrained_model_path: runs/2022-12-13_19:18:20/training_stage_0/epoch_1/model.eqx 
 
   # shape of the auxiliary variables
   auxiliary_shape: [16, 3]
@@ -85,9 +85,9 @@ train:
   - num_epochs: 2
     num_iters_per_epoch: 1000
     init_learning_rate: 0.001
-    target_learning_rate: 0.0005
+    target_learning_rate: 0.001
     weight_nll: 1.0
     weight_fm: 0.0
     weight_fe: 0.0001
-    fm_aggregation: huber
+    fm_aggregation: rmse
     num_samples: 128

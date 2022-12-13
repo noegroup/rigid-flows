@@ -3,15 +3,16 @@
 # some useful stuff
 
 import json
+import numpy as np
 from sys import stderr
 
-import matplotlib.pyplot as plt
-import mdtraj as md
-import numpy as np
 import openmm
 import openmm.app
 from openmm import unit
+from openmmtools.testsystems import LennardJonesFluid
 
+import matplotlib.pyplot as plt
+import mdtraj as md
 try:
     import nglview as nv  # type: ignore
 except:
@@ -19,78 +20,55 @@ except:
     nv = None
 
 
-class WaterModel:
+class LennardJonesModel:
     def __init__(
         self,
-        positions,
-        box,
-        water_type="tip4pew",
-        nonbondedCutoff=1,
+        nparticles,
+        reduced_density,
+        reduced_cutoff=2.5,
+        lattice=True,
         barostat=None,
         external_field=None,
     ):
-        if water_type not in ["tip3p", "tip4pew", "tip5p", "spce"]:
-            print(
-                f"+++ WARNING: Unknown water_type `{water_type}` +++",
-                file=stderr,
-            )  # might still work
-        if "spc" in water_type:
-            n_sites = 3
-        else:
-            n_sites = int(
-                "".join(x for x in water_type if x.isdigit())
-            )  # get n_sites from water_type name
-        assert (
-            len(positions) % n_sites == 0
-        ), "mismatch between number of atoms per molecule and total number of atoms"
-        n_waters = len(positions) // n_sites
-
-        mdtraj_topology = self.generate_mdtraj_topology(n_waters, n_sites)
-
-        topology = mdtraj_topology.to_openmm()
-        topology.setPeriodicBoxVectors(box)
-
-        if nonbondedCutoff > np.diagonal(box).min() / 2:
-            nonbondedCutoff = np.diagonal(box).min() / 2
-            print(
-                f"+++ WARNING: `nonbondedCutoff` too large, changed to {nonbondedCutoff} +++",
-                file=stderr,
-            )
-
-        ff = openmm.app.ForceField(water_type + ".xml")
-        system = ff.createSystem(
-            topology,
-            nonbondedMethod=openmm.app.PME,
-            nonbondedCutoff=nonbondedCutoff,
-            rigidWater=True,
-            removeCMMotion=True,
+        #typical values for Argon, also default in https://openmmtools.readthedocs.io/en/stable/api/generated/openmmtools.testsystems.LennardJonesFluid.html
+        self.sigma = 0.34
+        self.mass = 39.9
+        self.epsilon = (0.238 * unit.kilocalorie_per_mole).value_in_unit(unit.kilojoule_per_mole)
+        
+        reduced_box_edge = np.cbrt(nparticles / reduced_density)
+        if reduced_box_edge < 2 * reduced_cutoff:
+            raise ValueError('cutoff should not be smaller than half box size')
+        
+        model = LennardJonesFluid(
+            nparticles=nparticles,
+            reduced_density=reduced_density,
+            mass=self.mass * unit.amu,
+            sigma=self.sigma * unit.nanometer,
+            epsilon=self.epsilon * unit.kilojoule_per_mole,
+            cutoff=reduced_cutoff * self.sigma * unit.nanometer,
+            lattice=lattice,
+            shift=True,
         )
-
-        forces = {
-            force.__class__.__name__: force for force in system.getForces()
-        }
-        forces["NonbondedForce"].setUseSwitchingFunction(False)
-        forces["NonbondedForce"].setUseDispersionCorrection(True)
-        forces["NonbondedForce"].setEwaldErrorTolerance(1e-4)
-
-        self.system = system
-        self.topology = topology
-        self.mdtraj_topology = mdtraj_topology
+        model.system.addForce(openmm.CMMotionRemover())
+        self.system = model.system
+        self.topology = model.topology
+        self.mdtraj_topology = model.mdtraj_topology
 
         self.set_barostat(barostat)
         self.set_external_field(external_field)
-
-        self._positions = np.array(positions)
-        self._box = np.array(box)
+        
+        model.positions += (model.system.getDefaultPeriodicBoxVectors()[0][0] - max(max(model.positions)))/2
+        self._positions = np.array(model.positions.value_in_unit(unit.nanometer))
+        
+        self._box = np.array([b.value_in_unit(unit.nanometer) for b in model.system.getDefaultPeriodicBoxVectors()])
         self.is_box_orthorombic = not np.count_nonzero(
-            box - np.diag(np.diagonal(box))
+            self.box - np.diag(np.diagonal(self.box))
         )
 
-        self.n_waters = n_waters
-        self.n_sites = n_sites
-        self.n_atoms = n_waters * n_sites
-        self.water_type = water_type
-        self.nonbondedCutoff = nonbondedCutoff
+        self.nparticles = nparticles
+        self.reduced_density = reduced_density
+        self.reduced_cutoff = reduced_cutoff
+        self.lattice = lattice
 
     @property
     def positions(self):
@@ -112,29 +90,6 @@ class WaterModel:
         self.is_box_orthorombic = not np.count_nonzero(
             box - np.diag(np.diagonal(box))
         )
-
-    @staticmethod
-    def generate_mdtraj_topology(n_waters, n_sites=4):
-        assert n_sites >= 3, "only 3 or more sites are supported"
-        H = md.element.Element.getBySymbol("H")
-        O = md.element.Element.getBySymbol("O")
-        VS = md.element.Element.getBySymbol("VS")
-        water_top = md.Topology()
-        water_top.add_chain()
-        for i in range(n_waters):
-            water_top.add_residue("HOH", water_top.chain(0))
-            water_top.add_atom("O", O, water_top.residue(i))
-            water_top.add_atom("H1", H, water_top.residue(i))
-            water_top.add_atom("H2", H, water_top.residue(i))
-            for _ in range(n_sites - 3):
-                water_top.add_atom("M", VS, water_top.residue(i))
-            water_top.add_bond(
-                water_top.atom(n_sites * i), water_top.atom(n_sites * i + 1)
-            )
-            water_top.add_bond(
-                water_top.atom(n_sites * i), water_top.atom(n_sites * i + 2)
-            )
-        return water_top
 
     def set_barostat(
         self, barostat, pressure=1 * unit.bar, temperature=300 * unit.kelvin
@@ -208,10 +163,10 @@ class WaterModel:
 
     def save_to_json(self, filename):
         init_info = {
-            "positions": self._positions.tolist(),
-            "box": self._box.tolist(),
-            "water_type": self.water_type,
-            "nonbondedCutoff": self.nonbondedCutoff,
+            "nparticles": self.nparticles,
+            "reduced_density": self.reduced_density,
+            "reduced_cutoff": self.reduced_cutoff,
+            "lattice": self.lattice,
             "barostat": self.barostat,
             "external_field": self.external_field,
         }
@@ -222,49 +177,51 @@ class WaterModel:
     def load_from_json(filename):
         with open(filename, "r") as f:
             init_info = json.load(f)
-        return WaterModel(**init_info)
+        return LennardJonesModel(**init_info)
 
-def setup_simulation(
-    self,
-    temperature,
-    frictionCoeff=1 / unit.picosecond,
-    stepSize=1 * unit.femtosecond,
-    minimizeEnergy=False,
-):
-    integrator = openmm.LangevinMiddleIntegrator(
-        temperature, frictionCoeff, stepSize
-    )
-    if self.barostat is not None:
-        for force in self.system.getForces():
-            if isinstance(
-                force,
-                (
-                    openmm.MonteCarloBarostat,
-                    openmm.MonteCarloAnisotropicBarostat,
-                    openmm.MonteCarloFlexibleBarostat,
-                ),
-            ):
-                force.setDefaultTemperature(temperature)
-    simulation = openmm.app.Simulation(self.topology, self.system, integrator)
-    simulation.context.setPositions(self.positions)
-
-    if minimizeEnergy:
-        print(
-            "old energy:",
-            simulation.context.getState(getEnergy=True)
-            .getPotentialEnergy()
-            .value_in_unit(unit.kilojoule_per_mole),
+    def setup_simulation(
+        self,
+        reduced_temperature,
+        frictionCoeff=1 / unit.picosecond,
+        stepSize=1 * unit.femtosecond,
+        minimizeEnergy=False,
+    ):
+        kB = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(unit.kilojoule_per_mole/unit.kelvin)
+        temperature = (reduced_temperature * self.epsilon / kB)
+        integrator = openmm.LangevinMiddleIntegrator(
+            temperature, frictionCoeff, stepSize
         )
-        simulation.minimizeEnergy()  # volume is not changed
-        print(
-            "new energy:",
-            simulation.context.getState(getEnergy=True)
-            .getPotentialEnergy()
-            .value_in_unit(unit.kilojoule_per_mole),
-        )
+        if self.barostat is not None:
+            for force in self.system.getForces():
+                if isinstance(
+                    force,
+                    (
+                        openmm.MonteCarloBarostat,
+                        openmm.MonteCarloAnisotropicBarostat,
+                        openmm.MonteCarloFlexibleBarostat,
+                    ),
+                ):
+                    force.setDefaultTemperature(temperature)
+        simulation = openmm.app.Simulation(self.topology, self.system, integrator)
+        simulation.context.setPositions(self.positions)
 
-    return simulation
+        if minimizeEnergy:
+            print(
+                "old energy:",
+                simulation.context.getState(getEnergy=True)
+                .getPotentialEnergy()
+                .value_in_unit(unit.kilojoule_per_mole),
+            )
+            simulation.minimizeEnergy()  # volume is not changed
+            print(
+                "new energy:",
+                simulation.context.getState(getEnergy=True)
+                .getPotentialEnergy()
+                .value_in_unit(unit.kilojoule_per_mole),
+            )
 
+        return simulation
+    
     def plot_2Dview(self, pos=None, box=None, toPBC=False):
         if pos is None:
             pos = self._positions
@@ -279,7 +236,7 @@ def setup_simulation(
             alpha = 0.05
         else:
             raise ValueError('pos should be of shape (nframes, natoms, 3)')
-        if pos.shape[-2] != self.n_atoms or pos.shape[-1] != 3:
+        if pos.shape[-2] != self.nparticles or pos.shape[-1] != 3:
             raise ValueError('pos should be of shape (nframes, natoms, 3)')
 
         av_box = box.mean(axis=0) if len(box.shape) == 3 else box
@@ -301,10 +258,8 @@ def setup_simulation(
             plt.subplot(1, 3, 1+i)
 
             #draw particles
-            plt.scatter(mypos[..., 1::self.n_sites, i], mypos[..., 1::self.n_sites, ii], marker=marker, alpha=alpha, c='gray')
-            plt.scatter(mypos[..., 2::self.n_sites, i], mypos[..., 2::self.n_sites, ii], marker=marker, alpha=alpha, c='gray')
-            plt.scatter(mypos[..., ::self.n_sites, i], mypos[..., ::self.n_sites, ii], marker=marker, alpha=alpha, c='r')
-
+            plt.scatter(mypos[..., :, i], mypos[..., :, ii], marker=marker, alpha=alpha, c='gray')
+            
             #draw box
             coord = [
                 [0, 0],
@@ -339,29 +294,29 @@ def setup_simulation(
             pos = self._positions
         if box is None:
             box = self._box
-
+        
         traj = md.Trajectory(pos, self.mdtraj_topology)
         traj.unitcell_vectors = np.resize(box, (len(traj), 3, 3))
-
+        
         return traj
-
-    def plot_rdf(self, pos=None, box=None, r_range=[0,1], selection='name == O', **kwargs):
+    
+    def plot_rdf(self, pos=None, box=None, r_range=[0,1], **kwargs):
         traj = self.get_mdtraj(pos, box)
-        ij = self.mdtraj_topology.select_pairs(selection, selection)
-        rdf = md.compute_rdf(traj, ij, r_range=r_range)
-
+        
+        rdf = md.compute_rdf(traj, self.mdtraj_topology.select_pairs('True', 'True'), r_range)
         plt.plot(*rdf, **kwargs)
-        plt.ylabel('g(r)')
-        plt.xlabel('r [nm]')
         plt.xlim(r_range)
-
+        plt.xlabel('r [nm]')
+        plt.ylabel('g(r)')
+    
     def get_view(self, pos=None, box=None):
         """visualize in notebook with nglview"""
         if nv is None:
             print("+++ WARNING: nglview not available +++", file=stderr)
             return None
 
-        view = nv.show_mdtraj(self.get_mdtraj(pos, box))
+        traj = traj = self.get_mdtraj(pos, box)
+        view = nv.show_mdtraj(traj)
         view.add_representation("ball+stick", selection="water")
         view.add_unitcell()
         return view

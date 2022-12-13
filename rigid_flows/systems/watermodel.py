@@ -99,8 +99,8 @@ class WaterModel:
                 file=stderr,
             )
 
-        # ff = openmm.app.ForceField(water_type + ".xml")
-        ff = openmm.app.ForceField("./test.xml")
+        ff = openmm.app.ForceField(water_type + ".xml")
+        # ff = openmm.app.ForceField("./test.xml")
         system = ff.createSystem(
             topology,
             nonbondedMethod=openmm.app.PME,

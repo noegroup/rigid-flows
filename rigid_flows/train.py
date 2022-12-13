@@ -94,19 +94,20 @@ def per_sample_loss(
     losses = {}
     if weight_nll > 0:
         inp, _ = unpack(target.sample(next(chain)))
-        nll_loss = weight_nll * negative_log_likelihood(inp, base, flow)
+        nll_loss = negative_log_likelihood(inp, base, flow)
         losses["nll"] = nll_loss
+        nll_loss = weight_nll * nll_loss
     if weight_fm > 0:
         assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
-        fm_loss = weight_fm * force_matching_loss(
-            inp, base, flow, fm_aggregation
-        )
+        fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
         losses["fm"] = fm_loss
+        fm_loss = weight_fm * fm_loss
     if weight_fe > 0:
         inp, _ = unpack(base.sample(next(chain)))
-        kl_loss = weight_fe * free_energy_loss(inp, target, flow)
+        kl_loss = free_energy_loss(inp, target, flow)
         losses["kl"] = kl_loss
+        kl_loss = weight_fe * kl_loss
     total_loss = sum(losses.values()) / len(losses)
     return total_loss, losses
 

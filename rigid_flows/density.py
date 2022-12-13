@@ -11,6 +11,7 @@ import tensorflow_probability.substrates.jax as tfp  # type: ignore
 from jax import Array
 from jax_dataclasses import pytree_dataclass
 
+from flox import geom
 from flox.flow import Transformed
 from flox.util import key_chain
 
@@ -22,6 +23,14 @@ from .system import OpenMMEnergyModel, SimulationBox, wrap_openmm_model
 T = TypeVar("T")
 
 KeyArray = Array | jax.random.PRNGKeyArray
+
+
+def smooth_maximum(a, bins=1000, sigma=10000, window=1000):
+    freqs, bins = jnp.histogram(a, bins=bins)
+    gx = np.arange(-4 * sigma, 4 * sigma, window)
+    gaussian = np.exp(-((gx / sigma) ** 2) / 2)
+    freqs = jnp.convolve(freqs, gaussian, mode="same")
+    return bins[jnp.argmax(freqs)]
 
 
 class PositionPrior(eqx.Module):
@@ -36,8 +45,19 @@ class PositionPrior(eqx.Module):
         self.box = SimulationBox(data.box)
         oxy = data.pos.reshape(data.pos.shape[0], -1, 4, 3)[:, :, 0]
 
-        r = oxy.reshape(oxy.shape[0], -1)
-        self.mean = jnp.mean(r, axis=0).reshape(oxy.shape[1:])
+        self.mean = jax.vmap(
+            jax.vmap(smooth_maximum, in_axes=1, out_axes=0),
+            in_axes=2,
+            out_axes=1,
+        )(oxy)
+
+        # r = oxy.reshape(oxy.shape[0], -1)
+
+        r = jax.vmap(
+            lambda x: geom.Torus(self.box.size).tangent(x, x - self.mean)
+        )(oxy)
+        r = r.reshape(r.shape[0], -1)
+        # self.mean = jnp.mean(r, axis=0).reshape(oxy.shape[1:])
 
         C = jnp.cov(r.T)
         D, U = jnp.linalg.eigh(C)

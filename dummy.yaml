@@ -68,10 +68,10 @@ model:
 
 # system definition
 system:
-  path: "./data/water"
+  path: "/home/jonas/Downloads"
   num_molecules: 16
-  temperature: 250
-  ice_type: Ih
+  temperature: 100
+  ice_type: XI
   recompute_forces: false
   store_forces: false
   forces_path: null

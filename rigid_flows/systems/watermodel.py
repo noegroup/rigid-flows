@@ -224,46 +224,46 @@ class WaterModel:
             init_info = json.load(f)
         return WaterModel(**init_info)
 
-def setup_simulation(
-    self,
-    temperature,
-    frictionCoeff=1 / unit.picosecond,
-    stepSize=1 * unit.femtosecond,
-    minimizeEnergy=False,
-):
-    integrator = openmm.LangevinMiddleIntegrator(
-        temperature, frictionCoeff, stepSize
-    )
-    if self.barostat is not None:
-        for force in self.system.getForces():
-            if isinstance(
-                force,
-                (
-                    openmm.MonteCarloBarostat,
-                    openmm.MonteCarloAnisotropicBarostat,
-                    openmm.MonteCarloFlexibleBarostat,
-                ),
-            ):
-                force.setDefaultTemperature(temperature)
-    simulation = openmm.app.Simulation(self.topology, self.system, integrator)
-    simulation.context.setPositions(self.positions)
-
-    if minimizeEnergy:
-        print(
-            "old energy:",
-            simulation.context.getState(getEnergy=True)
-            .getPotentialEnergy()
-            .value_in_unit(unit.kilojoule_per_mole),
+    def setup_simulation(
+        self,
+        temperature,
+        frictionCoeff=1 / unit.picosecond,
+        stepSize=1 * unit.femtosecond,
+        minimizeEnergy=False,
+    ):
+        integrator = openmm.LangevinMiddleIntegrator(
+            temperature, frictionCoeff, stepSize
         )
-        simulation.minimizeEnergy()  # volume is not changed
-        print(
-            "new energy:",
-            simulation.context.getState(getEnergy=True)
-            .getPotentialEnergy()
-            .value_in_unit(unit.kilojoule_per_mole),
-        )
+        if self.barostat is not None:
+            for force in self.system.getForces():
+                if isinstance(
+                    force,
+                    (
+                        openmm.MonteCarloBarostat,
+                        openmm.MonteCarloAnisotropicBarostat,
+                        openmm.MonteCarloFlexibleBarostat,
+                    ),
+                ):
+                    force.setDefaultTemperature(temperature)
+        simulation = openmm.app.Simulation(self.topology, self.system, integrator)
+        simulation.context.setPositions(self.positions)
 
-    return simulation
+        if minimizeEnergy:
+            print(
+                "old energy:",
+                simulation.context.getState(getEnergy=True)
+                .getPotentialEnergy()
+                .value_in_unit(unit.kilojoule_per_mole),
+            )
+            simulation.minimizeEnergy()  # volume is not changed
+            print(
+                "new energy:",
+                simulation.context.getState(getEnergy=True)
+                .getPotentialEnergy()
+                .value_in_unit(unit.kilojoule_per_mole),
+            )
+
+        return simulation
 
     def plot_2Dview(self, pos=None, box=None, toPBC=False):
         if pos is None:
@@ -279,8 +279,8 @@ def setup_simulation(
             alpha = 0.05
         else:
             raise ValueError('pos should be of shape (nframes, natoms, 3)')
-        if pos.shape[-2] != self.n_atoms or pos.shape[-1] != 3:
-            raise ValueError('pos should be of shape (nframes, natoms, 3)')
+        if pos.shape[-1] != 3:
+            raise ValueError('pos should be in 3D')
 
         av_box = box.mean(axis=0) if len(box.shape) == 3 else box
         if av_box.shape != (3, 3):

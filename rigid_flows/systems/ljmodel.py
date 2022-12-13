@@ -34,11 +34,11 @@ class LennardJonesModel:
         self.sigma = 0.34
         self.mass = 39.9
         self.epsilon = (0.238 * unit.kilocalorie_per_mole).value_in_unit(unit.kilojoule_per_mole)
-        
+
         reduced_box_edge = np.cbrt(nparticles / reduced_density)
         if reduced_box_edge < 2 * reduced_cutoff:
             raise ValueError('cutoff should not be smaller than half box size')
-        
+
         model = LennardJonesFluid(
             nparticles=nparticles,
             reduced_density=reduced_density,
@@ -56,10 +56,10 @@ class LennardJonesModel:
 
         self.set_barostat(barostat)
         self.set_external_field(external_field)
-        
+
         model.positions += (model.system.getDefaultPeriodicBoxVectors()[0][0] - max(max(model.positions)))/2
         self._positions = np.array(model.positions.value_in_unit(unit.nanometer))
-        
+
         self._box = np.array([b.value_in_unit(unit.nanometer) for b in model.system.getDefaultPeriodicBoxVectors()])
         self.is_box_orthorombic = not np.count_nonzero(
             self.box - np.diag(np.diagonal(self.box))
@@ -221,7 +221,7 @@ class LennardJonesModel:
             )
 
         return simulation
-    
+
     def plot_2Dview(self, pos=None, box=None, toPBC=False):
         if pos is None:
             pos = self._positions
@@ -236,8 +236,8 @@ class LennardJonesModel:
             alpha = 0.05
         else:
             raise ValueError('pos should be of shape (nframes, natoms, 3)')
-        if pos.shape[-2] != self.nparticles or pos.shape[-1] != 3:
-            raise ValueError('pos should be of shape (nframes, natoms, 3)')
+        if pos.shape[-1] != 3:
+            raise ValueError('pos should be in 3D')
 
         av_box = box.mean(axis=0) if len(box.shape) == 3 else box
         if av_box.shape != (3, 3):
@@ -259,7 +259,7 @@ class LennardJonesModel:
 
             #draw particles
             plt.scatter(mypos[..., :, i], mypos[..., :, ii], marker=marker, alpha=alpha, c='gray')
-            
+
             #draw box
             coord = [
                 [0, 0],
@@ -294,21 +294,21 @@ class LennardJonesModel:
             pos = self._positions
         if box is None:
             box = self._box
-        
+
         traj = md.Trajectory(pos, self.mdtraj_topology)
         traj.unitcell_vectors = np.resize(box, (len(traj), 3, 3))
-        
+
         return traj
-    
+
     def plot_rdf(self, pos=None, box=None, r_range=[0,1], **kwargs):
         traj = self.get_mdtraj(pos, box)
-        
+
         rdf = md.compute_rdf(traj, self.mdtraj_topology.select_pairs('True', 'True'), r_range)
         plt.plot(*rdf, **kwargs)
         plt.xlim(r_range)
         plt.xlabel('r [nm]')
         plt.ylabel('g(r)')
-    
+
     def get_view(self, pos=None, box=None):
         """visualize in notebook with nglview"""
         if nv is None:

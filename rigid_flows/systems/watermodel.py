@@ -99,11 +99,11 @@ class WaterModel:
                 file=stderr,
             )
 
-        # ff = openmm.app.ForceField(water_type + ".xml")
+        ff = openmm.app.ForceField(water_type + ".xml")
 
-        ff = openmm.app.ForceField(
-            "/home/jonas/dev/PhD/so3/experiments/rigid_flows/rigid_flows/systems/test.xml"
-        )
+        # ff = openmm.app.ForceField(
+        #     "/home/jonas/dev/PhD/so3/experiments/rigid_flows/rigid_flows/systems/test.xml"
+        # )
         system = ff.createSystem(
             topology,
             nonbondedMethod=openmm.app.PME,
@@ -122,19 +122,19 @@ class WaterModel:
         self.system = system
 
         # see https://github.com/openmm/openmm/blob/master/wrappers/python/openmm/app/data/tip4pew.xml
-        new_force = "select(step(r - 0.28414902091026306), 4*epsilon0*((sigma0/r)^12-(sigma0/r)^6), 3.0*r^2 + -310.4779357910156*r + 92.69363403320312)"  # TODO define a force
-        OOforce = openmm.CustomNonbondedForce(
-            f"{new_force}; sigma0=0.316435; epsilon0=0.680946"
-        )
+        # new_force = "select(step(r - 0.28414902091026306), 4*epsilon0*((sigma0/r)^12-(sigma0/r)^6), 3.0*r^2 + -310.4779357910156*r + 92.69363403320312)"  # TODO define a force
         # OOforce = openmm.CustomNonbondedForce(
-        #     f"-4*epsilon0*((sigma0/r)^12-(sigma0/r)^6)+{new_force}; sigma0=0.316435; epsilon0=0.680946"
+        #     f"{new_force}; sigma0=0.316435; epsilon0=0.680946"
         # )
-        OOforce.addInteractionGroup(
-            np.arange(0, n_atoms, n_sites), np.arange(0, n_atoms, n_sites)
-        )
-        self.system.addForce(OOforce)
-        for i in range(system.getNumParticles()):
-            OOforce.addParticle([])
+        # # OOforce = openmm.CustomNonbondedForce(
+        # #     f"-4*epsilon0*((sigma0/r)^12-(sigma0/r)^6)+{new_force}; sigma0=0.316435; epsilon0=0.680946"
+        # # )
+        # OOforce.addInteractionGroup(
+        #     np.arange(0, n_atoms, n_sites), np.arange(0, n_atoms, n_sites)
+        # )
+        # self.system.addForce(OOforce)
+        # for i in range(system.getNumParticles()):
+        #     OOforce.addParticle([])
 
         self.topology = topology
         self.mdtraj_topology = mdtraj_topology

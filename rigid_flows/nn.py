@@ -35,12 +35,12 @@ class QuatEncoder(eqx.Module):
 class Transformer(eqx.Module):
     """Standard impl of a transformer according to the `attention is all you need` paper."""
 
-    attention_1: eqx.nn.MultiheadAttention
+    attention: eqx.nn.MultiheadAttention
     attention_2: eqx.nn.MultiheadAttention
 
     norm_1: eqx.nn.LayerNorm
     norm_2: eqx.nn.LayerNorm
-    norm_3: eqx.nn.LayerNorm
+    norm_2: eqx.nn.LayerNorm
 
     dense: eqx.nn.Sequential
 
@@ -58,16 +58,7 @@ class Transformer(eqx.Module):
 
         chain = key_chain(key)
 
-        self.attention_1 = eqx.nn.MultiheadAttention(
-            num_heads,
-            num_dims * num_heads,
-            use_key_bias=True,
-            use_query_bias=False,
-            use_output_bias=True,
-            key=next(chain),
-        )
-
-        self.attention_2 = eqx.nn.MultiheadAttention(
+        self.attention = eqx.nn.MultiheadAttention(
             num_heads,
             num_dims * num_heads,
             use_key_bias=True,
@@ -84,10 +75,6 @@ class Transformer(eqx.Module):
             shape=(num_dims * num_heads), elementwise_affine=True
         )
 
-        self.norm_3 = eqx.nn.LayerNorm(
-            shape=(num_dims * num_heads), elementwise_affine=True
-        )
-
         self.dense = dense(
             (num_dims * num_heads, num_hidden, num_dims * num_heads),
             jax.nn.silu,
@@ -97,16 +84,8 @@ class Transformer(eqx.Module):
     def __call__(
         self, input: Float[Array, "... seq_len node_dim"]
     ) -> Float[Array, "... seq_len node_dim"]:
-
-        input += self.attention_1(input, input, input)
-        input = jax.vmap(self.norm_1)(input)
-
-        input += self.attention_2(input, input, input)
-        input = jax.vmap(self.norm_2)(input)
-
-        input += jax.vmap(self.dense)(input)
-        input = jax.vmap(self.norm_3)(input)
-
+        input += jax.vmap(self.norm_1)(self.attention(input, input, input))
+        input += jax.vmap(self.norm_2)(jax.vmap(self.dense)(input))
         return input
 
 
@@ -141,7 +120,7 @@ class TransformerStack(eqx.Module):
         chain = key_chain(key)
         self.encoder = eqx.nn.Sequential(
             [
-                eqx.nn.LayerNorm(num_inp, elementwise_affine=True),
+                # eqx.nn.LayerNorm(num_inp, elementwise_affine=True),
                 eqx.nn.Linear(num_inp, num_heads * num_dims, key=next(chain)),
             ]
         )
@@ -151,7 +130,7 @@ class TransformerStack(eqx.Module):
         )
         self.decoder = eqx.nn.Sequential(
             [
-                eqx.nn.LayerNorm(num_heads * num_dims, elementwise_affine=True),
+                # eqx.nn.LayerNorm(num_heads * num_dims, elementwise_affine=True),
                 eqx.nn.Linear(num_heads * num_dims, num_out, key=next(chain)),
             ]
         )

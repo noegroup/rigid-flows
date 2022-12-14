@@ -328,6 +328,7 @@ class AuxUpdate(eqx.Module):
         out = out.reshape(input.aux.shape[0], -1)
         shift, scale = jnp.split(out, 2, axis=-1)
         shift = shift.reshape(self.auxiliary_shape)
+        shift = shift * 1e-1
         scale = scale.reshape(self.auxiliary_shape)
         scale = scale * 1e-1
         return shift, scale

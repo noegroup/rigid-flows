@@ -107,6 +107,7 @@ class ExperimentSpecification:
     system: SystemSpecification
     train: tuple[TrainingSpecification]
     reporting: ReportingSpecifications
+    global_step: int | None
 
     @staticmethod
     def load_from_file(path: str) -> "ExperimentSpecification":

@@ -104,31 +104,33 @@ def per_sample_loss(
 ):
     chain = key_chain(key)
 
+    total_loss = 0
+    num_losses = 0
     losses = {}
     var_grad_losses = {}
     if weight_nll > 0:
         inp, _ = unpack(target.sample(next(chain)))
         nll_loss = negative_log_likelihood(inp, base, flow)
         losses["nll"] = nll_loss
-        nll_loss = weight_nll * nll_loss
+        total_loss += weight_nll * nll_loss
     if weight_fm > 0:
         assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
         fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
         losses["fm"] = fm_loss
-        fm_loss = weight_fm * fm_loss
+        total_loss += weight_fm * fm_loss
+
     if weight_fe > 0:
         inp, _ = unpack(base.sample(next(chain)))
         kl_loss = free_energy_loss(inp, target, flow)
         losses["kl"] = kl_loss
-        kl_loss = weight_fe * kl_loss
+        total_loss += weight_fe * kl_loss
     if weight_vg_target > 0:
         inp, _ = unpack(target.sample(next(chain)))
         var_grad_losses["target"] = energy_difference(inp, base, target, flow)
     if weight_vg_model > 0:
         inp, _ = unpack(PullbackSampler(base.sample, flow)(next(chain)))
         var_grad_losses["model"] = energy_difference(inp, base, target, flow)
-    total_loss = sum(losses.values()) / len(losses)
     return total_loss, losses, var_grad_losses
 
 
@@ -168,7 +170,7 @@ def batch_loss(
         if weight > 0.0 and loss_type in var_grad_losses:
             var_grad_loss = var_grad_losses[loss_type]
             var_grad_loss_agg = 0.5 * jnp.var(var_grad_loss)
-            total_loss_agg += var_grad_loss_agg
+            total_loss_agg += weight * var_grad_loss_agg
             losses[loss_type] = var_grad_loss_agg
     return total_loss_agg, losses
 

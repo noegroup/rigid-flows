@@ -134,7 +134,7 @@ def main():
 
     backup_config_file(local_run_dir, args.specs)
 
-    tot_iter = 0
+    tot_iter = specs.global_step if specs.global_step is not None else 0
     with writer.as_default():
         flow = train(
             next(chain), local_run_dir, specs, base, target, flow, tot_iter

@@ -411,6 +411,7 @@ class PosUpdate(eqx.Module):
         out = out.reshape(input.pos.shape[0], -1)
         # out = out
         shift, scale = jnp.split(out, 2, axis=-1)
+        shift = shift * 1e-1
         scale = scale * 1e-1
         return shift, scale
 
@@ -645,16 +646,16 @@ def _preprocess(
     return Pipe[AugmentedData, State](
         [
             InitialTransform(),
-            # AuxUpdate(
-            #     auxiliary_shape=auxiliary_shape,
-            #     **asdict(specs.auxiliary_update),
-            #     key=next(chain),
-            # ),
-            # DisplacementEncoder(
-            #     auxiliary_shape=auxiliary_shape,
-            #     **asdict(specs.displacement_encoder),
-            #     key=next(chain),
-            # ),
+            AuxUpdate(
+                auxiliary_shape=auxiliary_shape,
+                **asdict(specs.auxiliary_update),
+                key=next(chain),
+            ),
+            DisplacementEncoder(
+                auxiliary_shape=auxiliary_shape,
+                **asdict(specs.displacement_encoder),
+                key=next(chain),
+            ),
         ]
     )
 

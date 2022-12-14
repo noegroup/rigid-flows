@@ -6,7 +6,9 @@ from dataclasses import asdict
 from typing import cast
 
 import equinox as eqx
+import git
 import tensorflow as tf  # type: ignore
+from git import Repo
 from rigid_flows.data import AugmentedData
 from rigid_flows.density import (
     BaseDensity,
@@ -85,8 +87,13 @@ def train(
     tot_iter: int,
 ) -> Transform[AugmentedData, State]:
     chain = key_chain(key)
-    tf.summary.text("run_params", pretty_json(asdict(specs)), step=tot_iter)
-    logger = logging.getLogger("main")
+    repo = git.Repo(search_parent_directories=True)
+    branch = repo.active_branch.name
+    sha = repo.head.object.hexsha
+
+    log = asdict(specs)
+    log["git"] = {"branch": branch, "sha": sha}
+    tf.summary.text("run_params", pretty_json(log), step=tot_iter)
     logging.info(f"Starting training.")
     reporter = Reporter(base, target, run_dir, specs.reporting, scope=None)
     reporter.with_scope(f"initial").report_model(next(chain), flow, tot_iter)

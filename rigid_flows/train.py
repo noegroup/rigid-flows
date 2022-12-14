@@ -165,13 +165,13 @@ def batch_loss(
     total_loss_agg = jnp.mean(total_loss)
 
     for weight, loss_type in zip(
-        (weight_vg_model, weight_vg_target), ("target", "model")
+        (weight_vg_model, weight_vg_target), ("model", "target")
     ):
         if weight > 0.0 and loss_type in var_grad_losses:
             var_grad_loss = var_grad_losses[loss_type]
             var_grad_loss_agg = 0.5 * jnp.var(var_grad_loss)
             total_loss_agg += weight * var_grad_loss_agg
-            losses[loss_type] = var_grad_loss_agg
+            losses["vargrad_" + loss_type] = var_grad_loss_agg
     return total_loss_agg, losses
 
 

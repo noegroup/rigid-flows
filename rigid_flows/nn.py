@@ -36,10 +36,8 @@ class Transformer(eqx.Module):
     """Standard impl of a transformer according to the `attention is all you need` paper."""
 
     attention: eqx.nn.MultiheadAttention
-    attention_2: eqx.nn.MultiheadAttention
 
     norm_1: eqx.nn.LayerNorm
-    norm_2: eqx.nn.LayerNorm
     norm_2: eqx.nn.LayerNorm
 
     dense: eqx.nn.Sequential

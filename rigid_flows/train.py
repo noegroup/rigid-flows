@@ -17,7 +17,7 @@ from optax import (
 )
 from tqdm import tqdm
 
-from flox.flow import Transform
+from flox.flow import PullbackSampler, Transform
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
@@ -98,13 +98,14 @@ def per_sample_loss(
     weight_nll: float,
     weight_fm: float,
     weight_fe: float,
-    weight_vg: float,
+    weight_vg_target: float,
+    weight_vg_model: float,
     fm_aggregation: str | None,
 ):
     chain = key_chain(key)
 
     losses = {}
-    var_grad_loss = None
+    var_grad_losses = {}
     if weight_nll > 0:
         inp, _ = unpack(target.sample(next(chain)))
         nll_loss = negative_log_likelihood(inp, base, flow)
@@ -121,11 +122,14 @@ def per_sample_loss(
         kl_loss = free_energy_loss(inp, target, flow)
         losses["kl"] = kl_loss
         kl_loss = weight_fe * kl_loss
-    if weight_vg > 0:
+    if weight_vg_target > 0:
         inp, _ = unpack(target.sample(next(chain)))
-        var_grad_loss = energy_difference(inp, base, target, flow)
+        var_grad_losses["target"] = energy_difference(inp, base, target, flow)
+    if weight_vg_model > 0:
+        inp, _ = unpack(PullbackSampler(base.sample, flow)(next(chain)))
+        var_grad_losses["model"] = energy_difference(inp, base, target, flow)
     total_loss = sum(losses.values()) / len(losses)
-    return total_loss, losses, var_grad_loss
+    return total_loss, losses, var_grad_losses
 
 
 def batch_loss(
@@ -136,11 +140,12 @@ def batch_loss(
     weight_nll: float,
     weight_fm: float,
     weight_fe: float,
-    weight_vg: float,
+    weight_vg_model: float,
+    weight_vg_target: float,
     fm_aggregation: str | None,
     num_samples: int,
 ):
-    total_loss, losses, var_grad_loss = jax.vmap(
+    total_loss, losses, var_grad_losses = jax.vmap(
         partial(
             per_sample_loss,
             base=base,
@@ -149,17 +154,23 @@ def batch_loss(
             weight_nll=weight_nll,
             weight_fm=weight_fm,
             weight_fe=weight_fe,
-            weight_vg=weight_vg,
+            weight_vg_model=weight_vg_model,
+            weight_vg_target=weight_vg_target,
             fm_aggregation=fm_aggregation,
         )
     )(jax.random.split(key, num_samples))
     losses = jax.tree_map(jnp.mean, losses)
     total_loss_agg = jnp.mean(total_loss)
-    if weight_vg > 0.0 and var_grad_loss is not None:
-        var_grad_loss_agg = 0.5 * jnp.var(var_grad_loss)
-        total_loss_agg += var_grad_loss_agg
-        losses["var_grad"] = var_grad_loss_agg
-    return jnp.mean(total_loss), losses
+
+    for weight, loss_type in zip(
+        (weight_vg_model, weight_vg_target), ("target", "model")
+    ):
+        if weight > 0.0 and loss_type in var_grad_losses:
+            var_grad_loss = var_grad_losses[loss_type]
+            var_grad_loss_agg = 0.5 * jnp.var(var_grad_loss)
+            total_loss_agg += var_grad_loss_agg
+            losses[loss_type] = var_grad_loss_agg
+    return total_loss_agg, losses
 
 
 def get_scheduler(specs: TrainingSpecification):
@@ -223,7 +234,8 @@ class Trainer:
                 weight_nll=self.weight_nll,
                 weight_fm=self.weight_fm,
                 weight_fe=self.weight_fe,
-                weight_vg=self.weight_vg,
+                weight_vg_model=self.weight_vg_model,
+                weight_vg_target=self.weight_vg_target,
                 fm_aggregation=self.fm_aggregation,
             ),
             has_aux=True,

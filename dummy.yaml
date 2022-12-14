@@ -1,16 +1,18 @@
 # random seed of the model
 seed: 42
 
+global_step: 0
+
 reporting:
   num_samples: 1000
   num_samples_per_batch: 1000
-  plot_quaternions: [1, 5] 
+  plot_quaternions: null # [1, 5] 
   plot_oxygens: true
-  plot_energy_histograms: true
-  report_ess: true
-  report_likelihood: true 
-  save_model: true
-  save_samples: true
+  plot_energy_histograms: false
+  report_ess: false
+  report_likelihood: false 
+  save_model: false
+  save_samples: false
   save_statistics: false
 
 model:
@@ -27,32 +29,32 @@ model:
     # initial transform
     preprocessing:
       auxiliary_update:
-        num_heads: 1
-        num_dims: 256
-        num_hidden: 256 
+        num_heads: 2
+        num_dims: 64
+        num_hidden: 256
         num_blocks: 1
       displacement_encoder:
-        num_heads: 4
-        num_dims: 256
+        num_heads: 2
+        num_dims: 64
         num_hidden: 256
         num_blocks: 1
 
     # coupling layers
     couplings:
-      - num_repetitions: 4
+      - num_repetitions: 2
         auxiliary_update:
-          num_heads: 1
-          num_dims: 256
+          num_heads: 2
+          num_dims: 64
           num_hidden: 256
           num_blocks: 1
         position_update:
-          num_heads: 1
-          num_dims: 256
+          num_heads: 2
+          num_dims: 64
           num_hidden: 256
           num_blocks: 1
         quaternion_update:
-          num_heads: 1
-          num_dims: 256
+          num_heads: 2
+          num_dims: 64
           num_hidden: 256
           num_blocks: 1
 
@@ -84,12 +86,12 @@ train:
   # first stage: only likelihood
   - num_epochs: 3
     num_iters_per_epoch: 1000
-    init_learning_rate: 0.001
-    target_learning_rate: 0.0005
+    init_learning_rate: 1e-3
+    target_learning_rate: 1e-3
     weight_nll: 1.0
-    weight_fm: 0.000
-    weight_fe: 0.000
-    weight_vg_model: 0.0001
-    weight_vg_target: 0.0001
-    fm_aggregation: rmse
+    weight_fm: 0
+    weight_fe: 0
+    weight_vg_model: 0
+    weight_vg_target: 0
+    fm_aggregation: null
     num_samples: 128

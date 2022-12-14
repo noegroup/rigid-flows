@@ -92,8 +92,8 @@ class BaseDensity(DensityModel[State]):
         rot_modes: Array,
         rot_concentration: Array,
         prior: PositionPrior,
-        # pos_means: Array,
-        # pos_stds: Array,
+        pos_means: Array,
+        pos_stds: Array,
         # pos_modes: Array,
         # pos_concentration,
         aux_means: Array,
@@ -103,8 +103,8 @@ class BaseDensity(DensityModel[State]):
         self.rot_model = tfp.distributions.VonMisesFisher(
             rot_modes, rot_concentration
         )
-        # self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
-        self.pos_model = prior
+        self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        # self.pos_model = prior
         # self.pos_model = tfp.distributions.VonMisesFisher(
         #     pos_modes, pos_concentration
         # )
@@ -178,13 +178,13 @@ class BaseDensity(DensityModel[State]):
             rot_concentration=base_specs.rot_concentration
             * jnp.ones((system_specs.num_molecules,)),
             prior=prior,
-            # pos_means=jnp.zeros(
-            #     (
-            #         system_specs.num_molecules,
-            #         3,
-            #     )
-            # ),
-            # pos_stds=jnp.ones((system_specs.num_molecules, 3)),
+            pos_means=jnp.zeros(
+                (
+                    system_specs.num_molecules,
+                    3,
+                )
+            ),
+            pos_stds=jnp.ones((system_specs.num_molecules, 3)),
             # pos_modes=jnp.tile(
             #     jnp.array([1.0, 0.0])[None, None],
             #     (system_specs.num_molecules, 3, 1),
@@ -241,7 +241,7 @@ class TargetDensity(DensityModel[AugmentedData]):
         aux_stds = jnp.ones(auxiliary_shape)
 
         com_means = jnp.zeros((3,))
-        com_stds = jnp.ones((3,)) * 5e-2
+        com_stds = jnp.ones((3,))
 
         self.aux_model = tfp.distributions.Normal(aux_means, aux_stds)
         self.com_model = tfp.distributions.Normal(com_means, com_stds)
@@ -328,13 +328,13 @@ class TargetDensity(DensityModel[AugmentedData]):
             aux = self.aux_model.sample(seed=next(chain))
             com = self.com_model.sample(seed=next(chain))
 
-            # pos = pos - pos.mean(axis=(0, 1))
+            pos = pos - pos.mean(axis=(0, 1))
 
             if self.data.force is not None:
                 force = self.data.force[idx]
-                # force += jax.grad(lambda x: self.com_model.log_prob(x).sum())(
-                #     com
-                # )
+                force += jax.grad(lambda x: self.com_model.log_prob(x).sum())(
+                    com
+                )
             else:
                 force = None
 

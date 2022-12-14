@@ -9,7 +9,12 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
+from optax import (
+    GradientTransformation,
+    OptState,
+    huber_loss,
+    safe_root_mean_squares,
+)
 from tqdm import tqdm
 
 from flox.flow import PullbackSampler, Transform
@@ -288,15 +293,13 @@ def run_training_stage(
                     next(chain), flow, opt_state
                 )
                 tf.summary.scalar(
-                    f"{reporter.scope}/loss/total", loss, tot_iter
+                    f"loss/total/{reporter.scope}", loss, tot_iter
                 )
                 for name, val in other_losses.items():
-                    tf.summary.scalar(
-                        f"loss/{name}", val, tot_iter
-                    )
+                    tf.summary.scalar(f"loss/{name}", val, tot_iter)
 
                 tf.summary.scalar(
-                    f"{reporter.scope}/learning_rate",
+                    f"learning_rate/{reporter.scope}",
                     scheduler(tot_iter),
                     tot_iter,
                 )

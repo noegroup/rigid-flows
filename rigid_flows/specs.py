@@ -19,25 +19,26 @@ class ReportingSpecifications:
 
 
 @pytree_dataclass(frozen=True)
-class TransformerStackSpecification:
-    num_heads: int
-    num_dims: int
-    num_hidden: int
-    num_blocks: int
+class DenseSpecification:
+    seq_len: int = 16
+    num_pos: int = 3
+    num_dims: int = 64
+    num_hidden: int = 64
+    num_blocks: int = 1
 
 
 @pytree_dataclass(frozen=True)
 class PreprocessingSpecification:
-    auxiliary_update: TransformerStackSpecification
-    displacement_encoder: TransformerStackSpecification
+    auxiliary_update: DenseSpecification
+    displacement_encoder: DenseSpecification
 
 
 @pytree_dataclass(frozen=True)
 class CouplingSpecification:
     num_repetitions: int
-    auxiliary_update: TransformerStackSpecification
-    position_update: TransformerStackSpecification
-    quaternion_update: TransformerStackSpecification
+    auxiliary_update: DenseSpecification
+    position_update: DenseSpecification
+    quaternion_update: DenseSpecification
 
 
 @pytree_dataclass(frozen=True)

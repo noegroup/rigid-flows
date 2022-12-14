@@ -1,5 +1,6 @@
 from dataclasses import asdict, astuple
 from math import prod
+from multiprocessing.sharedctypes import Value
 from turtle import forward
 from typing import Any
 
@@ -25,7 +26,7 @@ from flox.flow import (
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
-from .nn import QuatEncoder, TransformerStack
+from .nn import Dense, QuatEncoder
 from .specs import (
     CouplingSpecification,
     FlowSpecification,
@@ -173,14 +174,14 @@ class FullAffine:
 class QuatUpdate(eqx.Module):
     """Flow layer updating the quaternion part of a state"""
 
-    net: TransformerStack
+    net: Dense
 
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
-        num_pos: int = 3,
-        num_heads: int = 4,
+        seq_len=16,
         num_dims: int = 64,
+        num_pos: int = 3,
         num_hidden: int = 64,
         num_blocks: int = 1,
         *,
@@ -198,12 +199,10 @@ class QuatUpdate(eqx.Module):
             num_blocks (int, optional): number of transformer blocks. Defaults to 1.
             key (KeyArray): PRNGKey for param initialization
         """
-        self.net = TransformerStack(
+        self.net = Dense(
+            seq_len=seq_len,
             num_inp=auxiliary_shape[-1] + num_pos,
-            # num_inp=auxiliary_shape[-1] + num_pos * 2,
             num_out=4 * 4 + 4,  # num_rot,
-            num_heads=num_heads,
-            num_dims=num_dims,
             num_hidden=num_hidden,
             num_blocks=num_blocks,
             key=key,
@@ -268,14 +267,14 @@ class AuxUpdate(eqx.Module):
     """Flow layer updating the auxiliary part of a state"""
 
     symmetrizer: QuatEncoder
-    net: TransformerStack | eqx.nn.Sequential
+    net: Dense | eqx.nn.Sequential
     auxiliary_shape: tuple[int, ...]
 
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
+        seq_len: int = 16,
         num_pos: int = 3,
-        num_heads: int = 4,
         num_dims: int = 64,
         num_hidden: int = 64,
         num_blocks: int = 1,
@@ -296,12 +295,10 @@ class AuxUpdate(eqx.Module):
         chain = key_chain(key)
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.auxiliary_shape = auxiliary_shape
-        self.net = TransformerStack(
+        self.net = Dense(
+            seq_len=seq_len,
             num_inp=num_dims + num_pos,
-            # num_inp=num_dims + num_pos * 2,
             num_out=2 * auxiliary_shape[-1],
-            num_heads=num_heads,
-            num_dims=num_dims,
             num_hidden=num_hidden,
             num_blocks=num_blocks,
             key=next(chain),
@@ -352,12 +349,13 @@ class PosUpdate(eqx.Module):
     """Flow layer updating the position part of a state"""
 
     symmetrizer: QuatEncoder
-    net: TransformerStack
+    net: Dense
 
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
-        num_heads: int = 4,
+        seq_len: int = 16,
+        num_pos: int = 3,
         num_dims: int = 64,
         num_hidden: int = 64,
         num_blocks: int = 1,
@@ -378,12 +376,10 @@ class PosUpdate(eqx.Module):
         """
         chain = key_chain(key)
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
-        self.net = TransformerStack(
+        self.net = Dense(
+            seq_len=seq_len,
             num_inp=num_dims + auxiliary_shape[-1],
-            # num_out=3,
             num_out=2 * 3,
-            num_heads=num_heads,
-            num_dims=num_dims,
             num_hidden=num_hidden,
             num_blocks=num_blocks,
             key=next(chain),
@@ -401,6 +397,7 @@ class PosUpdate(eqx.Module):
         aux = input.aux
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
+
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
         out = self.net(feats)
         # out = out.reshape(input.pos.shape)
@@ -512,13 +509,13 @@ class DisplacementEncoder(eqx.Module):
     """
 
     symmetrizer: QuatEncoder
-    net: TransformerStack
+    net: Dense
 
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
+        seq_len: int = 16,
         num_pos: int = 3,
-        num_heads: int = 4,
         num_dims: int = 64,
         num_hidden: int = 64,
         num_blocks: int = 1,
@@ -541,13 +538,12 @@ class DisplacementEncoder(eqx.Module):
         """
         chain = key_chain(key)
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
-        self.net = TransformerStack(
+        self.net = Dense(
+            seq_len=seq_len,
             num_inp=auxiliary_shape[-1] + num_dims,
             num_out=num_pos,
-            # num_out=1,
-            num_heads=num_heads,
-            num_dims=num_dims,
             num_hidden=num_hidden,
+            num_blocks=num_blocks,
             key=next(chain),
         )
 
@@ -565,36 +561,20 @@ class DisplacementEncoder(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
         out = self.net(feats) * 1e-1
-        # out = jnp.tanh(out) * jnp.pi
-        # center = jax.vmap(jax.vmap(geom.rotmat2d))(out)
         center = out.reshape(input.pos.shape)
-        # center = jax.nn.sigmoid(center) * input.box.size
         return center
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
         center = self.params(input)
-        # pos = jnp.einsum("...i, ...ij -> ...j", input.pos, center)
         ldj = jnp.zeros(())
-        # return Transformed(lenses.bind(input).pos.set(pos), ldj)
         diff = input.pos - center
-        # diff = geom.Torus(input.box.size).tangent(center, input.pos - center)
-        # diff = diff / input.box.size * 2
-        # diff, ldj = unpack(VectorizedTransform(AtanhTransform()).forward(diff))
         return Transformed(lenses.bind(input).pos.set(diff), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
         center = self.params(input)
-        # pos = jnp.einsum("...i, ...ji -> ...j", input.pos, center)
         ldj = jnp.zeros(())
-        # return Transformed(lenses.bind(input).pos.set(pos), ldj)
-        # diff, ldj = unpack(
-        #     VectorizedTransform(AtanhTransform()).inverse(input.pos)
-        # )
-        # diff = diff * input.box.size / 2
-        # diff = input.pos
-        # pos = geom.Torus(input.box.size).shift(center, diff)
         pos = input.pos + center
         return Transformed(lenses.bind(input).pos.set(pos), ldj)
 
@@ -609,7 +589,6 @@ class InitialTransform:
         )
         rigid = lenses.bind(rigid).rot.set(rigid.rot * input.sign)
         pos = rigid.pos + input.com
-        # pos = rigid.pos
         state = State(rigid.rot, pos, rigid.ics, input.aux, input.box)
         return Transformed(state, ldj)
 
@@ -620,7 +599,6 @@ class InitialTransform:
 
         com = jnp.mean(pos, axis=(0, 1))
         pos = pos - com[None, None]
-        # com = 0.0 * pos
         data = AugmentedData(pos, com, input.aux, sign, input.box)
         return Transformed(data, ldj)
 

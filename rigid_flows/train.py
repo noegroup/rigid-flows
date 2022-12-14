@@ -9,7 +9,12 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
+from optax import (
+    GradientTransformation,
+    OptState,
+    huber_loss,
+    safe_root_mean_squares,
+)
 from tqdm import tqdm
 
 from flox.flow import Transform
@@ -153,7 +158,7 @@ def batch_loss(
     if weight_vg > 0.0 and var_grad_loss is not None:
         var_grad_loss_agg = 0.5 * jnp.var(var_grad_loss)
         total_loss_agg += var_grad_loss_agg
-        losses["var_grad"] = var_grad_loss
+        losses["var_grad"] = var_grad_loss_agg
     return jnp.mean(total_loss), losses
 
 

@@ -73,17 +73,26 @@ class Transformer(eqx.Module):
             shape=(num_dims * num_heads), elementwise_affine=True
         )
 
-        self.dense = dense(
-            (num_dims * num_heads, num_hidden, num_dims * num_heads),
-            jax.nn.silu,
-            key=next(chain),
+        self.dense = eqx.nn.Sequential(
+            [
+                eqx.nn.Linear(
+                    num_dims * num_heads, num_hidden, key=next(chain)
+                ),
+                eqx.nn.Lambda(jax.nn.silu),
+                eqx.nn.Linear(
+                    num_hidden, num_dims * num_heads, key=next(chain)
+                ),
+            ]
         )
 
     def __call__(
         self, input: Float[Array, "... seq_len node_dim"]
     ) -> Float[Array, "... seq_len node_dim"]:
-        input += jax.vmap(self.norm_1)(self.attention(input, input, input))
-        input += jax.vmap(self.norm_2)(jax.vmap(self.dense)(input))
+
+        arg = jax.vmap(self.norm_1)(input)
+        input += self.attention(arg, arg, arg)
+        arg = jax.vmap(self.norm_2)(input)
+        input += jax.vmap(self.dense)(input)
         return input
 
 

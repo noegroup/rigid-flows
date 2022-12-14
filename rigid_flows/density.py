@@ -358,9 +358,12 @@ class TargetDensity(DensityModel[AugmentedData]):
         model = OpenMMEnergyModel.from_specs(sys_specs)
         if sys_specs.recompute_forces:
             data = data.recompute_forces(model)
+        elif sys_specs.forces_path:
+            forces = np.load(sys_specs.forces_path)["forces"]
+            data = data.add_forces(forces)
         if sys_specs.store_forces and sys_specs.forces_path:
             assert data.force is not None
-            np.savez(sys_specs.forces_path, np.array(data.force))
+            np.savez(sys_specs.forces_path, forces=np.array(data.force))
 
         return TargetDensity(
             prior=prior,

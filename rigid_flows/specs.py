@@ -75,6 +75,7 @@ class TrainingSpecification:
     weight_nll: float
     weight_fm: float
     weight_fe: float
+    weight_vg: float
     fm_aggregation: str | None
     num_samples: int
 

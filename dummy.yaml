@@ -70,7 +70,7 @@ model:
 system:
   path: "/home/jonas/Downloads"
   num_molecules: 16
-  temperature: 100
+  temperature: 250
   ice_type: XI
   recompute_forces: false
   store_forces: false
@@ -87,7 +87,8 @@ train:
     init_learning_rate: 0.001
     target_learning_rate: 0.0005
     weight_nll: 1.0
-    weight_fm: 0.0001
+    weight_fm: 0.000
     weight_fe: 0.000
+    weight_vg: 0.0001
     fm_aggregation: rmse
     num_samples: 128

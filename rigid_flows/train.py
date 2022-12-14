@@ -9,12 +9,7 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import (
-    GradientTransformation,
-    OptState,
-    huber_loss,
-    safe_root_mean_squares,
-)
+from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
 from tqdm import tqdm
 
 from flox.flow import Transform
@@ -79,6 +74,17 @@ def free_energy_loss(
     return jnp.sum(target.potential(out) - ldj)
 
 
+def energy_difference(
+    inp: AugmentedData,
+    base: DensityModel,
+    target: DensityModel,
+    flow: Transform[AugmentedData, State],
+):
+    model_energy = negative_log_likelihood(inp, base, flow)
+    target_energy = target.potential(inp)
+    return target_energy - model_energy
+
+
 def per_sample_loss(
     key: KeyArray,
     base: DensityModel,
@@ -87,11 +93,13 @@ def per_sample_loss(
     weight_nll: float,
     weight_fm: float,
     weight_fe: float,
+    weight_vg: float,
     fm_aggregation: str | None,
 ):
     chain = key_chain(key)
 
     losses = {}
+    var_grad_loss = None
     if weight_nll > 0:
         inp, _ = unpack(target.sample(next(chain)))
         nll_loss = negative_log_likelihood(inp, base, flow)
@@ -108,8 +116,11 @@ def per_sample_loss(
         kl_loss = free_energy_loss(inp, target, flow)
         losses["kl"] = kl_loss
         kl_loss = weight_fe * kl_loss
+    if weight_vg > 0:
+        inp, _ = unpack(target.sample(next(chain)))
+        var_grad_loss = energy_difference(inp, base, target, flow)
     total_loss = sum(losses.values()) / len(losses)
-    return total_loss, losses
+    return total_loss, losses, var_grad_loss
 
 
 def batch_loss(
@@ -120,10 +131,11 @@ def batch_loss(
     weight_nll: float,
     weight_fm: float,
     weight_fe: float,
+    weight_vg: float,
     fm_aggregation: str | None,
     num_samples: int,
 ):
-    total_loss, losses = jax.vmap(
+    total_loss, losses, var_grad_loss = jax.vmap(
         partial(
             per_sample_loss,
             base=base,
@@ -132,10 +144,15 @@ def batch_loss(
             weight_nll=weight_nll,
             weight_fm=weight_fm,
             weight_fe=weight_fe,
+            weight_vg=weight_vg,
             fm_aggregation=fm_aggregation,
         )
     )(jax.random.split(key, num_samples))
     losses = jax.tree_map(jnp.mean, losses)
+    total_loss_agg = jnp.mean(total_loss)
+    if weight_vg > 0.0 and var_grad_loss is not None:
+        total_loss_agg += 0.5 * jnp.var(var_grad_loss)
+        losses["var_grad"] = var_grad_loss
     return jnp.mean(total_loss), losses
 
 
@@ -170,6 +187,7 @@ class Trainer:
     weight_nll: float
     weight_fm: float
     weight_fe: float
+    weight_vg: float
     fm_aggregation: str | None
     num_samples: int
 
@@ -199,6 +217,7 @@ class Trainer:
                 weight_nll=self.weight_nll,
                 weight_fm=self.weight_fm,
                 weight_fe=self.weight_fe,
+                weight_vg=self.weight_vg,
                 fm_aggregation=self.fm_aggregation,
             ),
             has_aux=True,
@@ -218,6 +237,7 @@ class Trainer:
             specs.weight_nll,
             specs.weight_fm,
             specs.weight_fe,
+            specs.weight_vg,
             specs.fm_aggregation,
             specs.num_samples,
         )

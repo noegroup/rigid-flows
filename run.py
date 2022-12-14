@@ -85,11 +85,11 @@ def train(
     tot_iter: int,
 ) -> Transform[AugmentedData, State]:
     chain = key_chain(key)
-    tf.summary.text("run_params", pretty_json(asdict(specs)), step=0)
+    tf.summary.text("run_params", pretty_json(asdict(specs)), step=tot_iter)
     logger = logging.getLogger("main")
     logging.info(f"Starting training.")
     reporter = Reporter(base, target, run_dir, specs.reporting, scope=None)
-    reporter.with_scope(f"initial").report_model(next(chain), flow, 0)
+    reporter.with_scope(f"initial").report_model(next(chain), flow, tot_iter)
     for stage, train_spec in enumerate(specs.train):
         flow = run_training_stage(
             next(chain),

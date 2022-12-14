@@ -26,7 +26,11 @@ from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .nn import QuatEncoder, TransformerStack
-from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
+from .specs import (
+    CouplingSpecification,
+    FlowSpecification,
+    PreprocessingSpecification,
+)
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -641,16 +645,16 @@ def _preprocess(
     return Pipe[AugmentedData, State](
         [
             InitialTransform(),
-            AuxUpdate(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.auxiliary_update),
-                key=next(chain),
-            ),
-            DisplacementEncoder(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.displacement_encoder),
-                key=next(chain),
-            ),
+            # AuxUpdate(
+            #     auxiliary_shape=auxiliary_shape,
+            #     **asdict(specs.auxiliary_update),
+            #     key=next(chain),
+            # ),
+            # DisplacementEncoder(
+            #     auxiliary_shape=auxiliary_shape,
+            #     **asdict(specs.displacement_encoder),
+            #     key=next(chain),
+            # ),
         ]
     )
 

@@ -204,7 +204,8 @@ class Trainer:
     weight_nll: float
     weight_fm: float
     weight_fe: float
-    weight_vg: float
+    weight_vg_model: float
+    weight_vg_target: float
     fm_aggregation: str | None
     num_samples: int
 
@@ -255,7 +256,8 @@ class Trainer:
             specs.weight_nll,
             specs.weight_fm,
             specs.weight_fe,
-            specs.weight_vg,
+            specs.weight_vg_model,
+            specs.weight_vg_target,
             specs.fm_aggregation,
             specs.num_samples,
         )

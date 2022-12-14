@@ -151,7 +151,8 @@ def batch_loss(
     losses = jax.tree_map(jnp.mean, losses)
     total_loss_agg = jnp.mean(total_loss)
     if weight_vg > 0.0 and var_grad_loss is not None:
-        total_loss_agg += 0.5 * jnp.var(var_grad_loss)
+        var_grad_loss_agg = 0.5 * jnp.var(var_grad_loss)
+        total_loss_agg += var_grad_loss_agg
         losses["var_grad"] = var_grad_loss
     return jnp.mean(total_loss), losses
 

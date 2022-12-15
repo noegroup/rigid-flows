@@ -25,11 +25,12 @@ class WaterModel:
         positions,
         box,
         water_type="tip4pew",
+        lambda_lj=None,
         nonbondedCutoff=1,
         barostat=None,
         external_field=None,
     ):
-        if water_type not in ["tip3p", "tip4pew", "tip5p", "spce"]:
+        if water_type not in ["tip3p", "tip4pew", "tip5p", "spce", "tip4pew-noLJ"]:
             print(
                 f"+++ WARNING: Unknown water_type `{water_type}` +++",
                 file=stderr,
@@ -50,19 +51,17 @@ class WaterModel:
         topology = mdtraj_topology.to_openmm()
         topology.setPeriodicBoxVectors(box)
 
-        n_atoms = topology.getNumAtoms()
         if nonbondedCutoff > np.diagonal(box).min() / 2:
             nonbondedCutoff = np.diagonal(box).min() / 2
             print(
                 f"+++ WARNING: `nonbondedCutoff` too large, changed to {nonbondedCutoff} +++",
                 file=stderr,
             )
-
-        ff = openmm.app.ForceField(water_type + ".xml")
-
-        # ff = openmm.app.ForceField(
-        #     "/home/jonas/dev/PhD/so3/experiments/rigid_flows/rigid_flows/systems/test.xml"
-        # )
+        
+        xml_path = ""
+        if "noLJ" in water_type:
+            xml_path = "./" #set path to custom xml files
+        ff = openmm.app.ForceField(xml_path + water_type + ".xml")
         system = ff.createSystem(
             topology,
             nonbondedMethod=openmm.app.PME,
@@ -75,24 +74,34 @@ class WaterModel:
                 force.setUseSwitchingFunction(False)
                 force.setUseDispersionCorrection(True)
                 force.setEwaldErrorTolerance(1e-4) #default is 5e-4
+        
+        if lambda_lj is not None:
+            if not 0 <= lambda_lj <= 1:
+                raise ValueError("lambda_lj must be between 0 (no LJ) and 1 (full LJ)")
+            if not "noLJ" in water_type:
+                print(
+                    f"+++ WARNING: lambda_lj should be used with a 'noLJ' water type ({water_type}) +++",
+                    file=stderr,
+                )
+            sigma, epsilon = 0.316435, 0.680946 #tip4pew values
+            lj_OO = openmm.CustomNonbondedForce(
+                "4*lambda*epsilon*((1/g)^2-(1/g));"
+                "g=0.5*(1-lambda)^2+(r/sigma)^6;"
+                f"sigma={sigma}; epsilon={epsilon}"
+            )
+            lj_OO.addGlobalParameter("lambda", lambda_lj)
+
+            lj_OO.setNonbondedMethod(openmm.CustomNonbondedForce.CutoffPeriodic)
+            lj_OO.setCutoffDistance(nonbondedCutoff)
+            lj_OO.setUseLongRangeCorrection(True)
+
+            OOindices = np.arange(0, system.getNumParticles(), n_sites)
+            lj_OO.addInteractionGroup(OOindices, OOindices)
+            for _ in range(system.getNumParticles()):
+                lj_OO.addParticle()
+            system.addForce(lj_OO)
 
         self.system = system
-
-        # see https://github.com/openmm/openmm/blob/master/wrappers/python/openmm/app/data/tip4pew.xml
-        # new_force = "select(step(r - 0.28414902091026306), 4*epsilon0*((sigma0/r)^12-(sigma0/r)^6), 3.0*r^2 + -310.4779357910156*r + 92.69363403320312)"  # TODO define a force
-        # OOforce = openmm.CustomNonbondedForce(
-        #     f"{new_force}; sigma0=0.316435; epsilon0=0.680946"
-        # )
-        # # OOforce = openmm.CustomNonbondedForce(
-        # #     f"-4*epsilon0*((sigma0/r)^12-(sigma0/r)^6)+{new_force}; sigma0=0.316435; epsilon0=0.680946"
-        # # )
-        # OOforce.addInteractionGroup(
-        #     np.arange(0, n_atoms, n_sites), np.arange(0, n_atoms, n_sites)
-        # )
-        # self.system.addForce(OOforce)
-        # for i in range(system.getNumParticles()):
-        #     OOforce.addParticle([])
-
         self.topology = topology
         self.mdtraj_topology = mdtraj_topology
 
@@ -109,6 +118,7 @@ class WaterModel:
         self.n_sites = n_sites
         self.n_atoms = n_waters * n_sites
         self.water_type = water_type
+        self.lambda_lj = lambda_lj
         self.nonbondedCutoff = nonbondedCutoff
 
     @property
@@ -230,6 +240,7 @@ class WaterModel:
             "positions": self._positions.tolist(),
             "box": self._box.tolist(),
             "water_type": self.water_type,
+            "lambda_lj": self.lambda_lj,
             "nonbondedCutoff": self.nonbondedCutoff,
             "barostat": self.barostat,
             "external_field": self.external_field,
@@ -291,10 +302,10 @@ class WaterModel:
             box = self._box
 
         if len(pos.squeeze().shape) == 2:
-            marker = "o"
+            marker = 'o'
             alpha = 1
         elif len(pos.squeeze().shape) == 3:
-            marker = "."
+            marker = '.'
             alpha = 0.05
         else:
             raise ValueError('pos should be of shape (nframes, natoms, 3)')
@@ -303,15 +314,13 @@ class WaterModel:
 
         av_box = box.mean(axis=0) if len(box.shape) == 3 else box
         if av_box.shape != (3, 3):
-            raise ValueError("box should be a 3x3 matrix")
+            raise ValueError('box should be a 3x3 matrix')
 
         if toPBC:
             if self.is_box_orthorombic:
                 mypos = (pos / np.diagonal(av_box) % 1) * np.diagonal(av_box)
             else:
-                raise NotImplementedError(
-                    "only available for fixed orthorombic box"
-                )
+                raise NotImplementedError('only available for fixed orthorombic box')
         else:
             mypos = pos
 
@@ -319,66 +328,39 @@ class WaterModel:
         for i in range(3):
             ii = (i + 1) % 3
             iii = (i + 2) % 3
-            plt.subplot(1, 3, 1 + i)
+            plt.subplot(1, 3, 1+i)
 
-            # draw particles
-            plt.scatter(
-                mypos[..., 1 :: self.n_sites, i],
-                mypos[..., 1 :: self.n_sites, ii],
-                marker=marker,  # type: ignore
-                alpha=alpha,
-                c="gray",
-            )
-            plt.scatter(
-                mypos[..., 2 :: self.n_sites, i],
-                mypos[..., 2 :: self.n_sites, ii],
-                marker=marker,  # type: ignore
-                alpha=alpha,
-                c="gray",
-            )
-            plt.scatter(
-                mypos[..., :: self.n_sites, i],
-                mypos[..., :: self.n_sites, ii],
-                marker=marker,  # type: ignore
-                alpha=alpha,
-                c="r",
-            )
+            #draw particles
+            plt.scatter(mypos[..., 1::self.n_sites, i], mypos[..., 1::self.n_sites, ii], marker=marker, alpha=alpha, c='gray')
+            plt.scatter(mypos[..., 2::self.n_sites, i], mypos[..., 2::self.n_sites, ii], marker=marker, alpha=alpha, c='gray')
+            plt.scatter(mypos[..., ::self.n_sites, i], mypos[..., ::self.n_sites, ii], marker=marker, alpha=alpha, c='r')
 
-            # draw box
+            #draw box
             coord = [
                 [0, 0],
-                [av_box[i, i], av_box[i, ii]],
-                [av_box[i, i] + av_box[ii, i], av_box[i, ii] + av_box[ii, ii]],
-                [av_box[ii, i], av_box[ii, ii]],
-                [0, 0],
+                [av_box[i,i], av_box[i,ii]],
+                [av_box[i,i] + av_box[ii,i], av_box[i,ii] + av_box[ii,ii]],
+                [av_box[ii,i], av_box[ii,ii]],
+                [0, 0]
             ]
             xs, ys = zip(*coord)
-            plt.plot(xs, ys, "k:")
+            plt.plot(xs, ys, 'k:')
             if not self.is_box_orthorombic:
                 coord2 = [
                     coord[1],
-                    [
-                        coord[1][0] + av_box[iii, i],
-                        coord[1][1] + av_box[iii, ii],
-                    ],
-                    [
-                        coord[2][0] + av_box[iii, i],
-                        coord[2][1] + av_box[iii, ii],
-                    ],
-                    [
-                        coord[3][0] + av_box[iii, i],
-                        coord[3][1] + av_box[iii, ii],
-                    ],
+                    [coord[1][0] + av_box[iii,i], coord[1][1] + av_box[iii,ii]],
+                    [coord[2][0] + av_box[iii,i], coord[2][1] + av_box[iii,ii]],
+                    [coord[3][0] + av_box[iii,i], coord[3][1] + av_box[iii,ii]],
                     coord[3],
                 ]
                 xs, ys = zip(*coord2)
-                plt.plot(xs, ys, "k:")
+                plt.plot(xs, ys, 'k:')
                 coord = [coord[2], coord2[2]]
                 xs, ys = zip(*coord)
-                plt.plot(xs, ys, "k:")
+                plt.plot(xs, ys, 'k:')
 
-            plt.xlabel(f"x{i} [nm]")
-            plt.ylabel(f"x{ii} [nm]")
+            plt.xlabel(f'x{i} [nm]')
+            plt.ylabel(f'x{ii} [nm]')
             plt.gca().set_aspect(1)
         plt.show()
 
@@ -430,3 +412,4 @@ def plot_energy(ene):
     plt.xlabel("energy [kJ/mol]")
 
     plt.show()
+

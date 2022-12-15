@@ -7,6 +7,7 @@ from typing import cast
 
 import equinox as eqx
 import git
+import jax
 import tensorflow as tf  # type: ignore
 from git import Repo
 from rigid_flows.data import AugmentedData
@@ -16,7 +17,7 @@ from rigid_flows.density import (
     PositionPrior,
     TargetDensity,
 )
-from rigid_flows.flow import State, build_flow
+from rigid_flows.flow import State, build_flow, initialize_actnorm
 from rigid_flows.reporting import Reporter, pretty_json
 from rigid_flows.specs import ExperimentSpecification
 from rigid_flows.train import run_training_stage
@@ -63,6 +64,17 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
     flow = build_flow(
         next(chain), specs.model.auxiliary_shape, specs.model.flow
     )
+
+    logging.info(f"Initializing ActNorm")
+
+    @eqx.filter_jit
+    def init_actnorm(flow, key):
+        actnorm_batch = jax.vmap(target.sample)(jax.random.split(key, 256)).obj
+        flow = initialize_actnorm(flow, actnorm_batch)
+        return flow
+
+    flow = init_actnorm(flow, next(chain))
+
     if specs.model.pretrained_model_path is not None:
         logging.info(
             f"Loading pre-trained model from {specs.model.pretrained_model_path}."

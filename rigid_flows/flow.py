@@ -355,7 +355,7 @@ class ActNorm(eqx.Module):
         output = input
         output = lenses.bind(output).pos.set(pos)
         output = lenses.bind(output).aux.set(aux)
-        ldj = -jnp.sum(self.pos_log_std) + jnp.sum(self.aux_log_std)
+        ldj = -jnp.sum(self.pos_log_std) - jnp.sum(self.aux_log_std)
         return Transformed(output, ldj)
 
     def inverse(self, input: State):
@@ -581,7 +581,7 @@ def _preprocess(
     key: KeyArray,
     auxiliary_shape: tuple[int, ...],
     specs: PreprocessingSpecification,
-) -> Pipe[AugmentedData, State]:
+) -> Transform[AugmentedData, State]:
     """The initial blocks handing:
 
      - mapping augmented data into a state
@@ -595,23 +595,7 @@ def _preprocess(
     Returns:
         Pipe[AugmentedData, State]: the initial transform
     """
-    chain = key_chain(key)
-    return Pipe[AugmentedData, State](
-        [
-            InitialTransform(),
-            AuxUpdate(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.auxiliary_update),
-                key=next(chain),
-            ),
-            PositionEncoder(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.displacement_encoder),
-                key=next(chain),
-            ),
-            ActNorm(),
-        ]
-    )
+    return InitialTransform()
 
 
 def _coupling(
@@ -649,6 +633,7 @@ def _coupling(
                 key=next(chain),
             ),
         ]
+
         if specs.act_norm:
             pos_block += [ActNorm()]
             aux_block += [ActNorm()]

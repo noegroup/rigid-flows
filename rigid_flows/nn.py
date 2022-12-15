@@ -82,7 +82,7 @@ class Dense(eqx.Module):
         self.seq_len = seq_len
         self.encoder = eqx.nn.Sequential(
             [
-                # eqx.nn.LayerNorm(seq_len * num_inp, elementwise_affine=True),
+                eqx.nn.LayerNorm(seq_len * num_inp, elementwise_affine=True),
                 eqx.nn.Linear(seq_len * num_inp, num_hidden, key=next(chain)),
             ]
         )
@@ -101,7 +101,7 @@ class Dense(eqx.Module):
         )
         self.decoder = eqx.nn.Sequential(
             [
-                # eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
+                eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
                 eqx.nn.Linear(num_hidden, seq_len * num_out, key=next(chain)),
             ]
         )

@@ -25,7 +25,7 @@ class WaterModel:
         positions,
         box,
         water_type="tip4pew",
-        lambda_lj=None,
+        linearize_below=None,
         nonbondedCutoff=1,
         barostat=None,
         external_field=None,
@@ -75,22 +75,23 @@ class WaterModel:
                 force.setUseDispersionCorrection(True)
                 force.setEwaldErrorTolerance(1e-4) #default is 5e-4
         
-        if lambda_lj is not None:
-            if not 0 <= lambda_lj <= 1:
-                raise ValueError("lambda_lj must be between 0 (no LJ) and 1 (full LJ)")
+        if linearize_below is not None:
+            sigma, epsilon = 0.316435, 0.680946 #tip4pew values
+            r_lin = linearize_below * sigma
+            if not 0 < r_lin < nonbondedCutoff:
+                raise ValueError(f"(linearize_below * {sigma}) must be smaller than the nonbondedCutoff={nonbondedCutoff}")
             if not "noLJ" in water_type:
                 print(
-                    f"+++ WARNING: lambda_lj should be used with a 'noLJ' water type ({water_type}) +++",
+                    f"+++ WARNING: 'linearize_below' should be used with a 'noLJ' water type ({water_type}) +++",
                     file=stderr,
                 )
-            sigma, epsilon = 0.316435, 0.680946 #tip4pew values
             lj_OO = openmm.CustomNonbondedForce(
-                "4*lambda*epsilon*((1/g)^2-(1/g));"
-                "g=0.5*(1-lambda)^2+(r/sigma)^6;"
-                f"sigma={sigma}; epsilon={epsilon}"
+                f"step(dr)*Ulj_r+step(-dr)*(Ulj_r_lin+dUlj_r_lin*dr)-delta(dr)*Ulj_r_lin;"
+                f"dr=r-{r_lin};"
+                f"Ulj_r=4*{epsilon}*(({sigma}/r)^12-({sigma}/r)^6);"
+                f"Ulj_r_lin=4*{epsilon}*(({sigma}/{r_lin})^12-({sigma}/{r_lin})^6);"
+                f"dUlj_r_lin=24*{epsilon}*(({sigma}/{r_lin})^7-({sigma}/{r_lin})^13)"
             )
-            lj_OO.addGlobalParameter("lambda", lambda_lj)
-
             lj_OO.setNonbondedMethod(openmm.CustomNonbondedForce.CutoffPeriodic)
             lj_OO.setCutoffDistance(nonbondedCutoff)
             lj_OO.setUseLongRangeCorrection(True)
@@ -118,7 +119,7 @@ class WaterModel:
         self.n_sites = n_sites
         self.n_atoms = n_waters * n_sites
         self.water_type = water_type
-        self.lambda_lj = lambda_lj
+        self.linearize_below = linearize_below
         self.nonbondedCutoff = nonbondedCutoff
 
     @property
@@ -240,7 +241,7 @@ class WaterModel:
             "positions": self._positions.tolist(),
             "box": self._box.tolist(),
             "water_type": self.water_type,
-            "lambda_lj": self.lambda_lj,
+            "linearize_below": self.linearize_below,
             "nonbondedCutoff": self.nonbondedCutoff,
             "barostat": self.barostat,
             "external_field": self.external_field,

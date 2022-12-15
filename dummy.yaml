@@ -16,7 +16,7 @@ reporting:
 model:
 
   # set if model is trained with warm start
-  pretrained_model_path: null 
+  pretrained_model_path: null # runs/2022-12-13_19:18:20/training_stage_0/epoch_1/model.eqx 
 
   # shape of the auxiliary variables
   auxiliary_shape: [16, 3]
@@ -27,33 +27,33 @@ model:
     # initial transform
     preprocessing:
       auxiliary_update:
-        num_heads: 4
-        num_dims: 64
-        num_hidden: 64
+        num_heads: 1
+        num_dims: 256
+        num_hidden: 256 
         num_blocks: 1
       displacement_encoder:
         num_heads: 4
-        num_dims: 64
-        num_hidden: 64
+        num_dims: 256
+        num_hidden: 256
         num_blocks: 1
 
     # coupling layers
     couplings:
-      - num_repetitions: 2
+      - num_repetitions: 4
         auxiliary_update:
-          num_heads: 4
-          num_dims: 64
-          num_hidden: 64
+          num_heads: 1
+          num_dims: 256
+          num_hidden: 256
           num_blocks: 1
         position_update:
-          num_heads: 4
-          num_dims: 64
-          num_hidden: 64
+          num_heads: 1
+          num_dims: 256
+          num_hidden: 256
           num_blocks: 1
         quaternion_update:
-          num_heads: 4
-          num_dims: 64
-          num_hidden: 64
+          num_heads: 1
+          num_dims: 256
+          num_hidden: 256
           num_blocks: 1
 
   # base density
@@ -68,11 +68,13 @@ model:
 
 # system definition
 system:
-  path: "./data/water"
+  path: "/home/jonas/Downloads"
   num_molecules: 16
   temperature: 250
-  ice_type: Ih
-  recompute_forces: true
+  ice_type: XI
+  recompute_forces: false
+  store_forces: false
+  forces_path: null
   fixed_box: true
 
 
@@ -80,12 +82,14 @@ system:
 train:
 
   # first stage: only likelihood
-  - num_epochs: 2
+  - num_epochs: 3
     num_iters_per_epoch: 1000
     init_learning_rate: 0.001
     target_learning_rate: 0.0005
     weight_nll: 1.0
-    weight_fm: 0.0
-    weight_fe: 0.0
-    fm_aggregation: huber
+    weight_fm: 0.000
+    weight_fe: 0.000
+    weight_vg_model: 0.0001
+    weight_vg_target: 0.0001
+    fm_aggregation: rmse
     num_samples: 128

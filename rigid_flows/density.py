@@ -1,12 +1,17 @@
+import math
 from collections.abc import Callable
 from functools import partial
 from typing import Protocol, TypeVar
 
+import equinox as eqx
 import jax
 import jax.numpy as jnp
+import numpy as np
 import tensorflow_probability.substrates.jax as tfp  # type: ignore
 from jax import Array
+from jax_dataclasses import pytree_dataclass
 
+from flox import geom
 from flox.flow import Transformed
 from flox.util import key_chain
 
@@ -18,6 +23,58 @@ from .system import OpenMMEnergyModel, SimulationBox, wrap_openmm_model
 T = TypeVar("T")
 
 KeyArray = Array | jax.random.PRNGKeyArray
+
+
+def smooth_maximum(a, bins=1000, sigma=10000, window=1000):
+    freqs, bins = jnp.histogram(a, bins=bins)
+    gx = np.arange(-4 * sigma, 4 * sigma, window)
+    gaussian = np.exp(-((gx / sigma) ** 2) / 2)
+    freqs = jnp.convolve(freqs, gaussian, mode="same")
+    return bins[jnp.argmax(freqs)]
+
+
+class PositionPrior(eqx.Module):
+
+    box: SimulationBox
+
+    mean: Array
+    cov_sqrt: Array
+    inv_cov_sqrt: Array
+
+    def __init__(self, data: Data):
+        self.box = SimulationBox(data.box)
+        oxy = data.pos.reshape(data.pos.shape[0], -1, 4, 3)[:, :, 0]
+
+        self.mean = jax.vmap(
+            jax.vmap(smooth_maximum, in_axes=1, out_axes=0),
+            in_axes=2,
+            out_axes=1,
+        )(oxy)
+
+        # r = oxy.reshape(oxy.shape[0], -1)
+
+        r = jax.vmap(
+            lambda x: geom.Torus(self.box.size).tangent(x, x - self.mean)
+        )(oxy)
+        r = r.reshape(r.shape[0], -1)
+        # self.mean = jnp.mean(r, axis=0).reshape(oxy.shape[1:])
+
+        C = jnp.cov(r.T)
+        D, U = jnp.linalg.eigh(C)
+        D = jnp.sqrt(D)
+        self.cov_sqrt = jnp.diag(D) @ U.T
+        self.inv_cov_sqrt = U @ jnp.diag(1.0 / (D + 1e-6))
+
+    def sample(self, *, seed: KeyArray):
+        r = jax.random.normal(seed, shape=(math.prod(self.mean.shape),))
+        r = (self.cov_sqrt.T @ r).reshape(self.mean.shape)
+        r = r + self.mean
+        return r
+
+    def log_prob(self, x: Array):
+        x = x.reshape(self.mean.shape)
+        diff = (x - self.mean).reshape(-1)
+        return -0.5 * jnp.square(diff @ self.inv_cov_sqrt).sum()
 
 
 class DensityModel(Protocol[T]):
@@ -34,8 +91,9 @@ class BaseDensity(DensityModel[State]):
         box: SimulationBox,
         rot_modes: Array,
         rot_concentration: Array,
-        pos_means: Array,
-        pos_stds: Array,
+        prior: PositionPrior,
+        # pos_means: Array,
+        # pos_stds: Array,
         # pos_modes: Array,
         # pos_concentration,
         aux_means: Array,
@@ -45,7 +103,8 @@ class BaseDensity(DensityModel[State]):
         self.rot_model = tfp.distributions.VonMisesFisher(
             rot_modes, rot_concentration
         )
-        self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        # self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        self.pos_model = prior
         # self.pos_model = tfp.distributions.VonMisesFisher(
         #     pos_modes, pos_concentration
         # )
@@ -106,6 +165,7 @@ class BaseDensity(DensityModel[State]):
     def from_specs(
         system_specs: SystemSpecification,
         base_specs: BaseSpecification,
+        prior: PositionPrior,
         box: SimulationBox,
         auxiliary_shape: tuple[int, ...],
     ):
@@ -117,13 +177,14 @@ class BaseDensity(DensityModel[State]):
             ),
             rot_concentration=base_specs.rot_concentration
             * jnp.ones((system_specs.num_molecules,)),
-            pos_means=jnp.zeros(
-                (
-                    system_specs.num_molecules,
-                    3,
-                )
-            ),
-            pos_stds=jnp.ones((system_specs.num_molecules, 3)),
+            prior=prior,
+            # pos_means=jnp.zeros(
+            #     (
+            #         system_specs.num_molecules,
+            #         3,
+            #     )
+            # ),
+            # pos_stds=jnp.ones((system_specs.num_molecules, 3)),
             # pos_modes=jnp.tile(
             #     jnp.array([1.0, 0.0])[None, None],
             #     (system_specs.num_molecules, 3, 1),
@@ -169,6 +230,7 @@ def cutoff_potential(
 class TargetDensity(DensityModel[AugmentedData]):
     def __init__(
         self,
+        prior: PositionPrior,
         auxiliary_shape: tuple[int, ...],
         sys_specs: SystemSpecification,
         model: OpenMMEnergyModel,
@@ -187,6 +249,7 @@ class TargetDensity(DensityModel[AugmentedData]):
         self.model = model
         self.data = data
         self.cutoff = cutoff_threshold
+        self.prior = prior
 
         # set simulation box
         if self.sys_specs.fixed_box:
@@ -196,7 +259,7 @@ class TargetDensity(DensityModel[AugmentedData]):
     def box(self) -> SimulationBox:
         if self.data is None:
             raise ValueError("Data not loaded.")
-        return SimulationBox(self.data.box[0])
+        return SimulationBox(jnp.diag(self.model.model.box))
 
     def potential(self, inp: AugmentedData) -> Array:
         """Evaluate the target density for a state
@@ -255,12 +318,17 @@ class TargetDensity(DensityModel[AugmentedData]):
             )
             box = SimulationBox(self.data.box[idx])
             pos = self.data.pos[idx].reshape(-1, 4, 3)
+
+            pos = self.prior.mean[:, None] + geom.Torus(box.size).tangent(
+                pos, pos - self.prior.mean[:, None]
+            )
+
             energy = self.data.energy[idx]
 
             aux = self.aux_model.sample(seed=next(chain))
             com = self.com_model.sample(seed=next(chain))
 
-            pos = pos - pos.mean(axis=(0, 1))
+            # pos = pos - pos.mean(axis=(0, 1))
 
             if self.data.force is not None:
                 force = self.data.force[idx]
@@ -286,11 +354,19 @@ class TargetDensity(DensityModel[AugmentedData]):
         sys_specs: SystemSpecification,
     ):
         data = Data.from_specs(sys_specs)
+        prior = PositionPrior(data)
         model = OpenMMEnergyModel.from_specs(sys_specs)
         if sys_specs.recompute_forces:
             data = data.recompute_forces(model)
+        elif sys_specs.forces_path:
+            forces = np.load(sys_specs.forces_path)["forces"]
+            data = data.add_forces(forces)
+        if sys_specs.store_forces and sys_specs.forces_path:
+            assert data.force is not None
+            np.savez(sys_specs.forces_path, forces=np.array(data.force))
 
         return TargetDensity(
+            prior=prior,
             auxiliary_shape=auxiliary_shape,
             sys_specs=sys_specs,
             model=model,

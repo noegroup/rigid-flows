@@ -9,15 +9,10 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import (
-    GradientTransformation,
-    OptState,
-    huber_loss,
-    safe_root_mean_squares,
-)
+from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
 from tqdm import tqdm
 
-from flox.flow import Transform
+from flox.flow import PullbackSampler, Transform
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
@@ -79,6 +74,17 @@ def free_energy_loss(
     return jnp.sum(target.potential(out) - ldj)
 
 
+def energy_difference(
+    inp: AugmentedData,
+    base: DensityModel,
+    target: DensityModel,
+    flow: Transform[AugmentedData, State],
+):
+    model_energy = negative_log_likelihood(inp, base, flow)
+    target_energy = target.potential(inp)
+    return target_energy - model_energy
+
+
 def per_sample_loss(
     key: KeyArray,
     base: DensityModel,
@@ -87,28 +93,40 @@ def per_sample_loss(
     weight_nll: float,
     weight_fm: float,
     weight_fe: float,
+    weight_vg_target: float,
+    weight_vg_model: float,
     fm_aggregation: str | None,
 ):
     chain = key_chain(key)
 
+    total_loss = 0
+    num_losses = 0
     losses = {}
+    var_grad_losses = {}
     if weight_nll > 0:
         inp, _ = unpack(target.sample(next(chain)))
-        nll_loss = weight_nll * negative_log_likelihood(inp, base, flow)
+        nll_loss = negative_log_likelihood(inp, base, flow)
         losses["nll"] = nll_loss
+        total_loss += weight_nll * nll_loss
     if weight_fm > 0:
         assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
-        fm_loss = weight_fm * force_matching_loss(
-            inp, base, flow, fm_aggregation
-        )
+        fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
         losses["fm"] = fm_loss
+        total_loss += weight_fm * fm_loss
+
     if weight_fe > 0:
         inp, _ = unpack(base.sample(next(chain)))
-        kl_loss = weight_fe * free_energy_loss(inp, target, flow)
+        kl_loss = free_energy_loss(inp, target, flow)
         losses["kl"] = kl_loss
-    total_loss = sum(losses.values()) / len(losses)
-    return total_loss, losses
+        total_loss += weight_fe * kl_loss
+    if weight_vg_target > 0:
+        inp, _ = unpack(target.sample(next(chain)))
+        var_grad_losses["target"] = energy_difference(inp, base, target, flow)
+    if weight_vg_model > 0:
+        inp, _ = unpack(PullbackSampler(base.sample, flow)(next(chain)))
+        var_grad_losses["model"] = energy_difference(inp, base, target, flow)
+    return total_loss, losses, var_grad_losses
 
 
 def batch_loss(
@@ -119,10 +137,12 @@ def batch_loss(
     weight_nll: float,
     weight_fm: float,
     weight_fe: float,
+    weight_vg_model: float,
+    weight_vg_target: float,
     fm_aggregation: str | None,
     num_samples: int,
 ):
-    total_loss, losses = jax.vmap(
+    total_loss, losses, var_grad_losses = jax.vmap(
         partial(
             per_sample_loss,
             base=base,
@@ -131,11 +151,23 @@ def batch_loss(
             weight_nll=weight_nll,
             weight_fm=weight_fm,
             weight_fe=weight_fe,
+            weight_vg_model=weight_vg_model,
+            weight_vg_target=weight_vg_target,
             fm_aggregation=fm_aggregation,
         )
     )(jax.random.split(key, num_samples))
     losses = jax.tree_map(jnp.mean, losses)
-    return jnp.mean(total_loss), losses
+    total_loss_agg = jnp.mean(total_loss)
+
+    for weight, loss_type in zip(
+        (weight_vg_model, weight_vg_target), ("model", "target")
+    ):
+        if weight > 0.0 and loss_type in var_grad_losses:
+            var_grad_loss = var_grad_losses[loss_type]
+            var_grad_loss_agg = 0.5 * jnp.var(var_grad_loss)
+            total_loss_agg += weight * var_grad_loss_agg
+            losses["vargrad_" + loss_type] = var_grad_loss_agg
+    return total_loss_agg, losses
 
 
 def get_scheduler(specs: TrainingSpecification):
@@ -169,6 +201,8 @@ class Trainer:
     weight_nll: float
     weight_fm: float
     weight_fe: float
+    weight_vg_model: float
+    weight_vg_target: float
     fm_aggregation: str | None
     num_samples: int
 
@@ -198,6 +232,8 @@ class Trainer:
                 weight_nll=self.weight_nll,
                 weight_fm=self.weight_fm,
                 weight_fe=self.weight_fe,
+                weight_vg_model=self.weight_vg_model,
+                weight_vg_target=self.weight_vg_target,
                 fm_aggregation=self.fm_aggregation,
             ),
             has_aux=True,
@@ -217,6 +253,8 @@ class Trainer:
             specs.weight_nll,
             specs.weight_fm,
             specs.weight_fe,
+            specs.weight_vg_model,
+            specs.weight_vg_target,
             specs.fm_aggregation,
             specs.num_samples,
         )
@@ -254,7 +292,7 @@ def run_training_stage(
                 )
                 for name, val in other_losses.items():
                     tf.summary.scalar(
-                        f"{reporter.scope}/loss/{name}", val, tot_iter
+                        f"loss/{name}", val, tot_iter
                     )
 
                 tf.summary.scalar(

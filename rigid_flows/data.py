@@ -53,6 +53,14 @@ class Data:
             force=jnp.array(forces),
         )
 
+    def add_forces(self, forces):
+        return Data(
+            pos=self.pos,
+            box=self.box,
+            energy=self.energy,
+            force=jnp.array(forces).reshape(self.pos.shape),
+        )
+
 
 @pytree_dataclass(frozen=True)
 class AugmentedData:

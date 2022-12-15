@@ -47,6 +47,12 @@ class OpenMMEnergyModel:
         temperature: float,
         error_handling: ErrorHandling = ErrorHandling.LogWarning,
     ):
+        self.kbT = (
+            unit.MOLAR_GAS_CONSTANT_R.value_in_unit(
+                unit.kilojoule_per_mole / unit.kelvin
+            )
+            * temperature
+        )
         self.model = model
         integrator = openmm.LangevinMiddleIntegrator(
             temperature * unit.kelvin, 1 / unit.picosecond, 1 * unit.femtosecond
@@ -99,11 +105,17 @@ class OpenMMEnergyModel:
                 state = self.simulation.context.getState(
                     getEnergy=True, getForces=True
                 )
-                energy = state.getPotentialEnergy().value_in_unit(
-                    unit.kilojoule_per_mole
+                energy = (
+                    state.getPotentialEnergy().value_in_unit(
+                        unit.kilojoule_per_mole
+                    )
+                    / self.kbT
                 )
-                force = state.getForces(asNumpy=True).value_in_unit(
-                    unit.kilojoule_per_mole / unit.nanometer
+                force = (
+                    state.getForces(asNumpy=True).value_in_unit(
+                        unit.kilojoule_per_mole / unit.nanometer
+                    )
+                    / self.kbT
                 )
             except Exception as e:
                 match self.error_handling:

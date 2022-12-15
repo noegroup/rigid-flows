@@ -75,6 +75,8 @@ class TrainingSpecification:
     weight_nll: float
     weight_fm: float
     weight_fe: float
+    weight_vg_model: float
+    weight_vg_target: float
     fm_aggregation: str | None
     num_samples: int
 
@@ -90,6 +92,8 @@ class SystemSpecification:
     temperature: int
     ice_type: str
     recompute_forces: bool
+    store_forces: bool
+    forces_path: str | None
     fixed_box: bool
 
     def __str__(self) -> str:
@@ -103,6 +107,7 @@ class ExperimentSpecification:
     system: SystemSpecification
     train: tuple[TrainingSpecification]
     reporting: ReportingSpecifications
+    global_step: int | None
 
     @staticmethod
     def load_from_file(path: str) -> "ExperimentSpecification":

@@ -26,7 +26,11 @@ from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .nn import QuatEncoder, TransformerStack
-from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
+from .specs import (
+    CouplingSpecification,
+    FlowSpecification,
+    PreprocessingSpecification,
+)
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -216,7 +220,9 @@ class QuatUpdate(eqx.Module):
             Array: the parameter (reflection) of the double moebius transform
         """
         aux = input.aux
-        pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
+        # pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
+        # pos = input.pos
+        pos = geom.Torus(input.box.size).projx(input.pos)
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (pos.shape[0], 1))
         feats = jnp.concatenate([aux, input.pos], axis=-1)
@@ -312,7 +318,8 @@ class AuxUpdate(eqx.Module):
         Returns:
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
-        pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
+        # pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
+        pos = geom.Torus(input.box.size).projx(input.pos)
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
         # feats = jnp.concatenate(
         #     [input.pos[..., 0], input.pos[..., 1], self.symmetrizer(input.rot)],
@@ -403,7 +410,7 @@ class PosUpdate(eqx.Module):
         # reflection = out / (1.0 + norm) * 0.99
         # return reflection
         out = out.reshape(input.pos.shape[0], -1)
-        out = out * 1e-1
+        out = out * 1e-3
         shift, scale = jnp.split(out, 2, axis=-1)
         return shift, scale
 
@@ -599,7 +606,8 @@ class InitialTransform:
             VectorizedTransform(RigidTransform()).forward(input.pos)
         )
         rigid = lenses.bind(rigid).rot.set(rigid.rot * input.sign)
-        pos = rigid.pos + input.com
+        # pos = rigid.pos + input.com
+        pos = rigid.pos
         state = State(rigid.rot, pos, rigid.ics, input.aux, input.box)
         return Transformed(state, ldj)
 
@@ -608,8 +616,9 @@ class InitialTransform:
         pos, ldj = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))
         sign = jnp.sign(input.rot[:, (0,)])
 
-        com = jnp.mean(pos, axis=(0, 1))
-        pos = pos - com[None, None]
+        # com = jnp.mean(pos, axis=(0, 1))
+        # pos = pos - com[None, None]
+        com = 0.0 * pos
         data = AugmentedData(pos, com, input.aux, sign, input.box)
         return Transformed(data, ldj)
 
@@ -636,16 +645,16 @@ def _preprocess(
     return Pipe[AugmentedData, State](
         [
             InitialTransform(),
-            AuxUpdate(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.auxiliary_update),
-                key=next(chain),
-            ),
-            DisplacementEncoder(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.displacement_encoder),
-                key=next(chain),
-            ),
+            # AuxUpdate(
+            #     auxiliary_shape=auxiliary_shape,
+            #     **asdict(specs.auxiliary_update),
+            #     key=next(chain),
+            # ),
+            # DisplacementEncoder(
+            #     auxiliary_shape=auxiliary_shape,
+            #     **asdict(specs.displacement_encoder),
+            #     key=next(chain),
+            # ),
         ]
     )
 

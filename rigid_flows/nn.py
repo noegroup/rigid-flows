@@ -116,10 +116,10 @@ class TransformerStack(eqx.Module):
     DISCLAIMER: right now only implements a simple dense net!!!!
     """
 
-    encoder: eqx.nn.Linear
-    decoder: eqx.nn.Linear
+    # encoder: eqx.nn.Linear
+    # decoder: eqx.nn.Linear
 
-    transformers: tuple[Transformer]
+    # transformers: tuple[Transformer]
 
     reduce_output: bool
 
@@ -139,16 +139,16 @@ class TransformerStack(eqx.Module):
         key: KeyArray
     ):
         chain = key_chain(key)
-        self.encoder = eqx.nn.Linear(
-            num_inp, num_heads * num_dims, key=next(chain)
-        )
-        self.transformers = tuple(
-            Transformer(num_heads, num_dims, num_hidden, key=next(chain))
-            for _ in range(num_blocks)
-        )
-        self.decoder = eqx.nn.Linear(
-            num_heads * num_dims, num_out, key=next(chain)
-        )
+        # self.encoder = eqx.nn.Linear(
+        #     num_inp, num_heads * num_dims, key=next(chain)
+        # )
+        # self.transformers = tuple(
+        #     Transformer(num_heads, num_dims, num_hidden, key=next(chain))
+        #     for _ in range(num_blocks)
+        # )
+        # self.decoder = eqx.nn.Linear(
+        #     num_heads * num_dims, num_out, key=next(chain)
+        # )
 
         self.foo = eqx.nn.Sequential(
             [

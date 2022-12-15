@@ -27,11 +27,7 @@ from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .nn import Dense, QuatEncoder
-from .specs import (
-    CouplingSpecification,
-    FlowSpecification,
-    PreprocessingSpecification,
-)
+from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -343,6 +339,61 @@ class AuxUpdate(eqx.Module):
         new, ldj = unpack(Affine(shift, scale).inverse(input.aux))
         ldj = jnp.sum(ldj)
         return Transformed(lenses.bind(input).aux.set(new), ldj)
+
+
+class ActNorm(eqx.Module):
+
+    pos_mean: Array | None = None
+    pos_std: Array | None = None
+    aux_mean: Array | None = None
+    aux_std: Array | None = None
+
+    def forward(self, input: State):
+        assert self.pos_mean is not None
+        assert self.pos_std is not None
+        assert self.aux_mean is not None
+        assert self.aux_std is not None
+        pos = (input.pos - self.pos_mean) / (self.pos_std + 1e-12)
+        aux = (input.aux - self.aux_mean) / (self.aux_std + 1e-12)
+        output = input
+        output = lenses.bind(output).pos.set(pos)
+        output = lenses.bind(output).aux.set(aux)
+        return Transformed(output, jnp.zeros(()))
+
+    def inverse(self, input: State):
+        assert self.pos_mean is not None
+        assert self.pos_std is not None
+        assert self.aux_mean is not None
+        assert self.aux_std is not None
+        pos = input.pos * (self.pos_mean + 1e-12) + self.pos_std
+        aux = input.aux * (self.aux_mean + 1e-12) + self.aux_std
+        output = input
+        output = lenses.bind(output).pos.set(pos)
+        output = lenses.bind(output).aux.set(aux)
+        return Transformed(output, jnp.zeros(()))
+
+    @staticmethod
+    def initialize(batch: State):
+        return ActNorm(
+            pos_mean=jnp.mean(batch.pos, axis=0),
+            aux_mean=jnp.mean(batch.aux, axis=0),
+            pos_std=jnp.std(batch.pos, axis=0),
+            aux_std=jnp.std(batch.aux, axis=0),
+        )
+
+
+def initialize_actnorm(flow: Pipe, batch: Any):
+    layers = []
+    for layer in flow.transforms:
+        if isinstance(layer, Pipe):
+            layer = initialize_actnorm(layer, batch)
+
+        if isinstance(layer, ActNorm):
+            layer = ActNorm.initialize(batch)
+        else:
+            batch, _ = unpack(jax.vmap(layer.forward)(batch))
+        layers.append(layer)
+    return Pipe(layers)
 
 
 class PosUpdate(eqx.Module):
@@ -661,6 +712,7 @@ def _coupling(
     blocks = []
     for _ in range(specs.num_repetitions):
         blocks += [
+            ActNorm(),
             AuxUpdate(
                 auxiliary_shape=auxiliary_shape,
                 **asdict(specs.auxiliary_update),

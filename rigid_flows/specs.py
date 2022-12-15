@@ -19,26 +19,34 @@ class ReportingSpecifications:
 
 
 @pytree_dataclass(frozen=True)
-class DenseSpecification:
-    seq_len: int = 16
-    num_pos: int = 3
-    num_dims: int = 64
-    num_hidden: int = 64
-    num_blocks: int = 1
+class PosAndAuxUpdateSpecification:
+    seq_len: int
+    activation: str
+    num_dims: int
+    num_hidden: int
+    num_blocks: int
+
+
+@pytree_dataclass(frozen=True)
+class QuatUpdateSpecification:
+    seq_len: int
+    activation: str
+    num_hidden: int
+    num_blocks: int
 
 
 @pytree_dataclass(frozen=True)
 class PreprocessingSpecification:
-    auxiliary_update: DenseSpecification
-    displacement_encoder: DenseSpecification
+    auxiliary_update: PosAndAuxUpdateSpecification
+    displacement_encoder: PosAndAuxUpdateSpecification
 
 
 @pytree_dataclass(frozen=True)
 class CouplingSpecification:
     num_repetitions: int
-    auxiliary_update: DenseSpecification
-    position_update: DenseSpecification
-    quaternion_update: DenseSpecification
+    auxiliary_update: PosAndAuxUpdateSpecification
+    position_update: PosAndAuxUpdateSpecification
+    quaternion_update: QuatUpdateSpecification
 
 
 @pytree_dataclass(frozen=True)

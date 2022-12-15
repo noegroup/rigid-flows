@@ -27,7 +27,11 @@ from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .nn import Dense, QuatEncoder
-from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
+from .specs import (
+    CouplingSpecification,
+    FlowSpecification,
+    PreprocessingSpecification,
+)
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -175,13 +179,10 @@ class QuatUpdate(eqx.Module):
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
-        seq_len=16,
-        num_dims: int = 64,
         num_pos: int = 3,
-        num_hidden: int = 64,
-        num_blocks: int = 1,
         *,
         key: KeyArray,
+        **kwargs,
     ):
         """Flow layer updating the quaternion part of a state.
 
@@ -196,12 +197,10 @@ class QuatUpdate(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         self.net = Dense(
-            seq_len=seq_len,
             num_inp=auxiliary_shape[-1] + num_pos,
             num_out=4 * 4 + 4,  # num_rot,
-            num_hidden=num_hidden,
-            num_blocks=num_blocks,
             key=key,
+            **kwargs,
         )
 
     def params(self, input: State):
@@ -215,12 +214,9 @@ class QuatUpdate(eqx.Module):
         """
         aux = input.aux
         pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
-        # pos = input.pos
-        # pos = geom.Torus(input.box.size).projx(input.pos)
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (pos.shape[0], 1))
         feats = jnp.concatenate([aux, input.pos], axis=-1)
-        # feats = jnp.concatenate([aux, input.pos[..., 0], input.pos[..., 1]])
         out = self.net(feats) * 1e-1
 
         mat, reflection = jnp.split(out, (16,), -1)  # type: ignore
@@ -269,13 +265,11 @@ class AuxUpdate(eqx.Module):
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
-        seq_len: int = 16,
         num_pos: int = 3,
         num_dims: int = 64,
-        num_hidden: int = 64,
-        num_blocks: int = 1,
         *,
         key: KeyArray,
+        **kwargs,
     ):
         """Flow layer updating the auxiliary part of a state.
 
@@ -292,13 +286,11 @@ class AuxUpdate(eqx.Module):
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.auxiliary_shape = auxiliary_shape
         self.net = Dense(
-            seq_len=seq_len,
             num_inp=num_dims + num_pos,
             num_out=2 * auxiliary_shape[-1],
-            num_hidden=num_hidden,
-            num_blocks=num_blocks,
             key=next(chain),
             reduce_output=(len(self.auxiliary_shape) == 1),
+            **kwargs,
         )
 
     def params(self, input: State) -> tuple[Array, Array]:
@@ -311,19 +303,12 @@ class AuxUpdate(eqx.Module):
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
         pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
-        # pos = geom.Torus(input.box.size).projx(input.pos)
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
-        # feats = jnp.concatenate(
-        #     [input.pos[..., 0], input.pos[..., 1], self.symmetrizer(input.rot)],
-        #     axis=-1,
-        # )
         out = self.net(feats)
         out = out.reshape(input.aux.shape[0], -1)
         shift, scale = jnp.split(out, 2, axis=-1)
         shift = shift.reshape(self.auxiliary_shape)
-        shift = shift * 1e-1
         scale = scale.reshape(self.auxiliary_shape)
-        scale = scale * 1e-1
         return shift, scale
 
     def forward(self, input: State) -> Transformed[State]:
@@ -344,41 +329,47 @@ class AuxUpdate(eqx.Module):
 class ActNorm(eqx.Module):
 
     pos_mean: Array | None = None
-    pos_std: Array | None = None
+    pos_log_std: Array | None = None
     aux_mean: Array | None = None
-    aux_std: Array | None = None
+    aux_log_std: Array | None = None
 
     def forward(self, input: State):
         assert self.pos_mean is not None
-        assert self.pos_std is not None
+        assert self.pos_log_std is not None
         assert self.aux_mean is not None
-        assert self.aux_std is not None
-        pos = (input.pos - self.pos_mean) / (self.pos_std + 1e-12)
-        aux = (input.aux - self.aux_mean) / (self.aux_std + 1e-12)
+        assert self.aux_log_std is not None
+        pos = (input.pos - self.pos_mean) * jnp.exp(-self.pos_log_std)
+        aux = (input.aux - self.aux_mean) * jnp.exp(-self.aux_log_std)
         output = input
         output = lenses.bind(output).pos.set(pos)
         output = lenses.bind(output).aux.set(aux)
-        return Transformed(output, jnp.zeros(()))
+        ldj = -jnp.sum(self.pos_log_std) + jnp.sum(self.aux_log_std)
+        return Transformed(output, ldj)
 
     def inverse(self, input: State):
         assert self.pos_mean is not None
-        assert self.pos_std is not None
+        assert self.pos_log_std is not None
         assert self.aux_mean is not None
-        assert self.aux_std is not None
-        pos = input.pos * (self.pos_mean + 1e-12) + self.pos_std
-        aux = input.aux * (self.aux_mean + 1e-12) + self.aux_std
+        assert self.aux_log_std is not None
+        pos = input.pos * jnp.exp(self.pos_log_std) + self.pos_mean
+        aux = input.aux * jnp.exp(self.pos_log_std) + self.aux_mean
         output = input
         output = lenses.bind(output).pos.set(pos)
         output = lenses.bind(output).aux.set(aux)
-        return Transformed(output, jnp.zeros(()))
+        ldj = jnp.sum(self.pos_log_std) + jnp.sum(self.aux_log_std)
+        return Transformed(output, ldj)
 
     @staticmethod
     def initialize(batch: State):
         return ActNorm(
             pos_mean=jnp.mean(batch.pos, axis=0),
             aux_mean=jnp.mean(batch.aux, axis=0),
-            pos_std=jnp.std(batch.pos, axis=0),
-            aux_std=jnp.std(batch.aux, axis=0),
+            pos_log_std=jnp.log(
+                jnp.clip(jnp.std(batch.pos, axis=0), 0.01, 100.0)
+            ),
+            aux_log_std=jnp.log(
+                jnp.clip(jnp.std(batch.aux, axis=0), 0.01, 100.0)
+            ),
         )
 
 
@@ -405,13 +396,10 @@ class PosUpdate(eqx.Module):
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
-        seq_len: int = 16,
-        num_pos: int = 3,
         num_dims: int = 64,
-        num_hidden: int = 64,
-        num_blocks: int = 1,
         *,
         key: KeyArray,
+        **kwargs,
     ):
         """Flow layer updating the position part of a state.
 
@@ -428,12 +416,10 @@ class PosUpdate(eqx.Module):
         chain = key_chain(key)
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.net = Dense(
-            seq_len=seq_len,
             num_inp=num_dims + auxiliary_shape[-1],
             num_out=2 * 3,
-            num_hidden=num_hidden,
-            num_blocks=num_blocks,
             key=next(chain),
+            **kwargs,
         )
 
     def params(self, input: State):  # -> tuple[Array, Array]:
@@ -451,109 +437,26 @@ class PosUpdate(eqx.Module):
 
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
         out = self.net(feats)
-        # out = out.reshape(input.pos.shape)
-        # norm = norm = jnp.sqrt(1e-12 + jnp.square(out)).sum(
-        #     axis=-1, keepdims=True
-        # )
-        # reflection = out / (1.0 + norm) * 0.99
-        # return reflection
         out = out.reshape(input.pos.shape[0], -1)
-        # out = out
         shift, scale = jnp.split(out, 2, axis=-1)
-        shift = shift * 1e-1
-        scale = scale * 1e-1
         return shift, scale
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        # reflection = self.params(input)
-        # new, ldj = unpack(
-        #     VectorizedTransform(
-        #         VectorizedTransform(Moebius(reflection))
-        #     ).forward(input.pos)
-        # )
-        # return Transformed(lenses.bind(input).pos.set(new), ldj)
         shift, scale = self.params(input)
-        # pos = input.pos
-        # pos = pos * jnp.exp(scale) + shift
-        # ldj = jnp.sum(scale)
-
         pos, ldj = unpack(Affine(shift, scale).forward(input.pos))
-        # com = input.com + jnp.mean(pos, axis=0)
-        # pos = pos - com
-
         out = lenses.bind(input).pos.set(pos)
-
-        # out = input
-
-        # out = lenses.bind(out).com.set(com)
-
-        # ldj = jnp.sum(ldj)
-        # params = self.params(input)
-        # new, ldj = unpack(
-        #     VectorizedTransform(FullAffine(params)).forward(input.pos)
-        #     # VectorizedTransform(FullAffine(params)).forward(input.pos)
-        # )
         return Transformed(out, ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        # reflection = self.params(input)
-        # new, ldj = unpack(
-        #     VectorizedTransform(
-        #         VectorizedTransform(Moebius(reflection))
-        #     ).inverse(input.pos)
-        # )
-        # return Transformed(lenses.bind(input).pos.set(new), ldj)
         shift, scale = self.params(input)
         pos, ldj = unpack(Affine(shift, scale).inverse(input.pos))
         out = lenses.bind(input).pos.set(pos)
-
-        # out = input
-        # out = lenses.bind(out).pos.set(pos)
-        # out = lenses.bind(out).com.set(com)
-
-        # ldj = jnp.sum(ldj)
-        # params = self.params(input)
-        # new, ldj = unpack(
-        #     VectorizedTransform(FullAffine(params)).inverse(input.pos)
-        #     # VectorizedTransform(FullAffine(params)).inverse(input.pos)
-        # )
         return Transformed(out, ldj)
 
 
-def log_cosh(x):
-    return jax.nn.logsumexp(jnp.stack([x, -x], axis=0), axis=0) + jnp.log(0.5)
-
-
-def tanh_transform(
-    x,
-):
-    y = jnp.tanh(x)
-    ldj = -2 * log_cosh(x)
-    return y, jnp.sum(ldj)
-
-
-def atanh_transform(
-    x,
-):
-    x = jnp.clip(x, -1.0 + 1e-6, 1.0 - 1e-6)
-    y = jnp.arctanh(x)
-    # ldj = jnp.log(1.0 / (1.0 - jnp.square(x)))
-    ldj = 2 * log_cosh(y)
-    return y, jnp.sum(ldj)
-
-
-@pytree_dataclass(frozen=True)
-class AtanhTransform:
-    def forward(self, input: Array) -> Transformed[Array]:
-        return Transformed(*atanh_transform(input))
-
-    def inverse(self, input: Array) -> Transformed[Array]:
-        return Transformed(*tanh_transform(input))
-
-
-class DisplacementEncoder(eqx.Module):
+class PositionEncoder(eqx.Module):
     """Encodes initial positions within the PBC box into
     displacement vectors relative to centers
     which are predicted from auxiliaries
@@ -565,13 +468,11 @@ class DisplacementEncoder(eqx.Module):
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
-        seq_len: int = 16,
         num_pos: int = 3,
         num_dims: int = 64,
-        num_hidden: int = 64,
-        num_blocks: int = 1,
         *,
         key: KeyArray,
+        **kwargs,
     ):
         """Encodes initial positions within the PBC box into
         displacement vectors relative to centers
@@ -590,12 +491,10 @@ class DisplacementEncoder(eqx.Module):
         chain = key_chain(key)
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.net = Dense(
-            seq_len=seq_len,
             num_inp=auxiliary_shape[-1] + num_dims,
             num_out=num_pos,
-            num_hidden=num_hidden,
-            num_blocks=num_blocks,
             key=next(chain),
+            **kwargs,
         )
 
     def params(self, input: State) -> Array:
@@ -681,7 +580,7 @@ def _preprocess(
                 **asdict(specs.auxiliary_update),
                 key=next(chain),
             ),
-            DisplacementEncoder(
+            PositionEncoder(
                 auxiliary_shape=auxiliary_shape,
                 **asdict(specs.displacement_encoder),
                 key=next(chain),

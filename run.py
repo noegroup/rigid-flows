@@ -69,7 +69,7 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
 
     @eqx.filter_jit
     def init_actnorm(flow, key):
-        actnorm_batch = jax.vmap(target.sample)(jax.random.split(key, 256)).obj
+        actnorm_batch = jax.vmap(target.sample)(jax.random.split(key, 1024)).obj
         flow = initialize_actnorm(flow, actnorm_batch)
         return flow
 

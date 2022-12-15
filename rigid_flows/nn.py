@@ -33,6 +33,22 @@ class QuatEncoder(eqx.Module):
         return (weight[..., None] * out[..., 1:]).sum(axis=0)
 
 
+def modified_square_plus(x, a=0.2, b=1.0):
+    return ((1.0 - a) * x + jnp.sqrt(jnp.square(x) + b) / jnp.sqrt(1 + b)) / (
+        2 - a
+    )
+
+
+ACTIVATION_FUNCTIONS = {
+    "silu": jax.nn.silu,
+    "tanh": jax.nn.tanh,
+    "mish": lambda x: x * jax.nn.tanh(jax.nn.softplus(x)),
+    "gelu": jax.nn.gelu,
+    "softplus": jax.nn.softplus,
+    "squareplus": modified_square_plus,
+}
+
+
 class Dense(eqx.Module):
     """Stack of transformer layers.
 
@@ -56,23 +72,28 @@ class Dense(eqx.Module):
         num_inp: int,
         num_out: int,
         num_hidden: int,
+        activation: str,
         num_blocks: int = 0,
         reduce_output: bool = False,
         *,
-        key: KeyArray
+        key: KeyArray,
     ):
         chain = key_chain(key)
         self.seq_len = seq_len
         self.encoder = eqx.nn.Sequential(
             [
+                eqx.nn.LayerNorm(seq_len * num_inp, elementwise_affine=True),
                 eqx.nn.Linear(seq_len * num_inp, num_hidden, key=next(chain)),
             ]
         )
+        if activation not in ACTIVATION_FUNCTIONS:
+            raise ValueError(f"unknown activation {activation}")
+
         self.inner = tuple(
             eqx.nn.Sequential(
                 [
                     eqx.nn.Linear(num_hidden, num_hidden, key=next(chain)),
-                    eqx.nn.Lambda(jax.nn.tanh),
+                    eqx.nn.Lambda(ACTIVATION_FUNCTIONS[activation]),
                     eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
                 ]
             )
@@ -80,6 +101,7 @@ class Dense(eqx.Module):
         )
         self.decoder = eqx.nn.Sequential(
             [
+                eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
                 eqx.nn.Linear(num_hidden, seq_len * num_out, key=next(chain)),
             ]
         )
@@ -88,12 +110,6 @@ class Dense(eqx.Module):
     def __call__(
         self, input: Float[Array, "... seq_len node_dim"]
     ) -> Float[Array, "... seq_len node_dim"]:
-        # out = self.foo(input.reshape(-1))
-        # if self.reduce_output:
-        #     out = out.sum(axis=0)
-        # else:
-        #     out = out.reshape(16, -1)
-        # return out
         input = self.encoder(input.reshape(-1))
         for res in self.inner:
             input = input + res(input)

@@ -47,6 +47,7 @@ class CouplingSpecification:
     auxiliary_update: PosAndAuxUpdateSpecification
     position_update: PosAndAuxUpdateSpecification
     quaternion_update: QuatUpdateSpecification
+    act_norm: bool
 
 
 @pytree_dataclass(frozen=True)

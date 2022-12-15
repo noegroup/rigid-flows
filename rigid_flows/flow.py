@@ -304,7 +304,7 @@ class AuxUpdate(eqx.Module):
         """
         pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats)
+        out = self.net(feats) * 1e-1
         out = out.reshape(input.aux.shape[0], -1)
         shift, scale = jnp.split(out, 2, axis=-1)
         shift = shift.reshape(self.auxiliary_shape)
@@ -313,16 +313,28 @@ class AuxUpdate(eqx.Module):
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        shift, scale = self.params(input)
-        new, ldj = unpack(Affine(shift, scale).forward(input.aux))
-        ldj = jnp.sum(ldj)
+        shift, pre_scale = self.params(input)
+
+        keep = jax.nn.sigmoid(pre_scale)
+        replace = jax.nn.sigmoid(-pre_scale)
+
+        ldj = jax.nn.log_sigmoid(pre_scale).sum()
+
+        new = input.aux * keep + shift * replace
+
         return Transformed(lenses.bind(input).aux.set(new), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        shift, scale = self.params(input)
-        new, ldj = unpack(Affine(shift, scale).inverse(input.aux))
-        ldj = jnp.sum(ldj)
+        shift, pre_scale = self.params(input)
+
+        keep = jax.nn.sigmoid(pre_scale)
+        replace = jax.nn.sigmoid(-pre_scale)
+
+        ldj = jax.nn.log_sigmoid(-pre_scale).sum()
+
+        new = (input.aux - shift * replace) / keep
+
         return Transformed(lenses.bind(input).aux.set(new), ldj)
 
 
@@ -436,24 +448,36 @@ class PosUpdate(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
 
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats)
+        out = self.net(feats) * 1e-1
         out = out.reshape(input.pos.shape[0], -1)
         shift, scale = jnp.split(out, 2, axis=-1)
         return shift, scale
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        shift, scale = self.params(input)
-        pos, ldj = unpack(Affine(shift, scale).forward(input.pos))
-        out = lenses.bind(input).pos.set(pos)
-        return Transformed(out, ldj)
+        shift, pre_scale = self.params(input)
+
+        keep = jax.nn.sigmoid(pre_scale)
+        replace = jax.nn.sigmoid(-pre_scale)
+
+        ldj = jax.nn.log_sigmoid(pre_scale).sum()
+
+        new = input.pos * keep + shift * replace
+
+        return Transformed(lenses.bind(input).pos.set(new), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        shift, scale = self.params(input)
-        pos, ldj = unpack(Affine(shift, scale).inverse(input.pos))
-        out = lenses.bind(input).pos.set(pos)
-        return Transformed(out, ldj)
+        shift, pre_scale = self.params(input)
+
+        keep = jax.nn.sigmoid(pre_scale)
+        replace = jax.nn.sigmoid(-pre_scale)
+
+        ldj = jax.nn.log_sigmoid(-pre_scale).sum()
+
+        new = (input.pos - shift * replace) / keep
+
+        return Transformed(lenses.bind(input).pos.set(new), ldj)
 
 
 class PositionEncoder(eqx.Module):
@@ -585,6 +609,7 @@ def _preprocess(
                 **asdict(specs.displacement_encoder),
                 key=next(chain),
             ),
+            ActNorm(),
         ]
     )
 
@@ -610,21 +635,30 @@ def _coupling(
     chain = key_chain(key)
     blocks = []
     for _ in range(specs.num_repetitions):
-        blocks += [
-            ActNorm(),
+        aux_block = [
             AuxUpdate(
                 auxiliary_shape=auxiliary_shape,
                 **asdict(specs.auxiliary_update),
                 key=next(chain),
-            ),
-            QuatUpdate(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.quaternion_update),
-                key=next(chain),
-            ),
+            )
+        ]
+        pos_block = [
             PosUpdate(
                 auxiliary_shape=auxiliary_shape,
                 **asdict(specs.position_update),
+                key=next(chain),
+            ),
+        ]
+        if specs.act_norm:
+            pos_block += [ActNorm()]
+            aux_block += [ActNorm()]
+
+        blocks += [
+            *aux_block,
+            *pos_block,
+            QuatUpdate(
+                auxiliary_shape=auxiliary_shape,
+                **asdict(specs.quaternion_update),
                 key=next(chain),
             ),
         ]

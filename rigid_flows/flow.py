@@ -309,6 +309,7 @@ class AuxUpdate(eqx.Module):
         shift, scale = jnp.split(out, 2, axis=-1)
         shift = shift.reshape(self.auxiliary_shape)
         scale = scale.reshape(self.auxiliary_shape)
+        scale = scale * 1e-1
         return shift, scale
 
     def forward(self, input: State) -> Transformed[State]:
@@ -437,6 +438,7 @@ class PosUpdate(eqx.Module):
         out = self.net(feats)
         out = out.reshape(input.pos.shape[0], -1)
         shift, scale = jnp.split(out, 2, axis=-1)
+        scale = scale * 1e-1
         return shift, scale
 
     def forward(self, input: State) -> Transformed[State]:

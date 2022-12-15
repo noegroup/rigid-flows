@@ -65,13 +65,11 @@ class WaterModel:
             rigidWater=True,
             removeCMMotion=True,
         )
-
-        forces = {
-            force.__class__.__name__: force for force in system.getForces()
-        }
-        forces["NonbondedForce"].setUseSwitchingFunction(False)
-        forces["NonbondedForce"].setUseDispersionCorrection(True)
-        forces["NonbondedForce"].setEwaldErrorTolerance(1e-4)
+        for force in system.getForces():
+            if isinstance(force, openmm.NonbondedForce):
+                force.setUseSwitchingFunction(False)
+                force.setUseDispersionCorrection(True)
+                force.setEwaldErrorTolerance(1e-4) #default is 5e-4
 
         self.system = system
         self.topology = topology

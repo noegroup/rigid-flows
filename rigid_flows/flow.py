@@ -304,7 +304,7 @@ class AuxUpdate(eqx.Module):
         """
         pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats) * 1e-1
+        out = self.net(feats)
         out = out.reshape(input.aux.shape[0], -1)
         shift, scale = jnp.split(out, 2, axis=-1)
         shift = shift.reshape(self.auxiliary_shape)
@@ -313,28 +313,18 @@ class AuxUpdate(eqx.Module):
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        shift, pre_scale = self.params(input)
-
-        keep = jax.nn.sigmoid(pre_scale)
-        replace = jax.nn.sigmoid(-pre_scale)
-
-        ldj = jax.nn.log_sigmoid(pre_scale).sum()
-
-        new = input.aux * keep + shift * replace
-
+        shift, log_scale = self.params(input)
+        scale = jnp.exp(log_scale)
+        ldj = log_scale.sum()
+        new = input.aux * scale + shift
         return Transformed(lenses.bind(input).aux.set(new), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        shift, pre_scale = self.params(input)
-
-        keep = jax.nn.sigmoid(pre_scale)
-        replace = jax.nn.sigmoid(-pre_scale)
-
-        ldj = jax.nn.log_sigmoid(-pre_scale).sum()
-
-        new = (input.aux - shift * replace) / keep
-
+        shift, log_scale = self.params(input)
+        inv_scale = jnp.exp(-log_scale)
+        ldj = -log_scale.sum()
+        new = (input.aux - shift) * inv_scale
         return Transformed(lenses.bind(input).aux.set(new), ldj)
 
 
@@ -376,12 +366,8 @@ class ActNorm(eqx.Module):
         return ActNorm(
             pos_mean=jnp.mean(batch.pos, axis=0),
             aux_mean=jnp.mean(batch.aux, axis=0),
-            pos_log_std=jnp.log(
-                jnp.clip(jnp.std(batch.pos, axis=0), 0.01, 100.0)
-            ),
-            aux_log_std=jnp.log(
-                jnp.clip(jnp.std(batch.aux, axis=0), 0.01, 100.0)
-            ),
+            pos_log_std=jnp.log(jnp.std(batch.pos, axis=0)),
+            aux_log_std=jnp.log(jnp.std(batch.aux, axis=0)),
         )
 
 
@@ -448,35 +434,25 @@ class PosUpdate(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
 
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats) * 1e-1
+        out = self.net(feats)
         out = out.reshape(input.pos.shape[0], -1)
         shift, scale = jnp.split(out, 2, axis=-1)
         return shift, scale
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        shift, pre_scale = self.params(input)
-
-        keep = jax.nn.sigmoid(pre_scale)
-        replace = jax.nn.sigmoid(-pre_scale)
-
-        ldj = jax.nn.log_sigmoid(pre_scale).sum()
-
-        new = input.pos * keep + shift * replace
-
+        shift, log_scale = self.params(input)
+        scale = jnp.exp(log_scale)
+        ldj = log_scale.sum()
+        new = input.pos * scale + shift
         return Transformed(lenses.bind(input).pos.set(new), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        shift, pre_scale = self.params(input)
-
-        keep = jax.nn.sigmoid(pre_scale)
-        replace = jax.nn.sigmoid(-pre_scale)
-
-        ldj = jax.nn.log_sigmoid(-pre_scale).sum()
-
-        new = (input.pos - shift * replace) / keep
-
+        shift, log_scale = self.params(input)
+        inv_scale = jnp.exp(-log_scale)
+        ldj = -log_scale.sum()
+        new = (input.pos - shift) * inv_scale
         return Transformed(lenses.bind(input).pos.set(new), ldj)
 
 

@@ -8,12 +8,11 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import tensorflow_probability.substrates.jax as tfp  # type: ignore
-from jax import Array
-from jax_dataclasses import pytree_dataclass
-
 from flox import geom
 from flox.flow import Transformed
 from flox.util import key_chain
+from jax import Array
+from jax_dataclasses import pytree_dataclass
 
 from .data import AugmentedData, Data
 from .flow import InternalCoordinates, State
@@ -53,9 +52,7 @@ class PositionPrior(eqx.Module):
 
         # r = oxy.reshape(oxy.shape[0], -1)
 
-        r = jax.vmap(
-            lambda x: geom.Torus(self.box.size).tangent(x, x - self.mean)
-        )(oxy)
+        r = jax.vmap(lambda x: geom.Torus(self.box.size).tangent(x, x - self.mean))(oxy)
         r = r.reshape(r.shape[0], -1)
         # self.mean = jnp.mean(r, axis=0).reshape(oxy.shape[1:])
 
@@ -100,9 +97,7 @@ class BaseDensity(DensityModel[State]):
         aux_stds: Array,
     ):
         self.box = box
-        self.rot_model = tfp.distributions.VonMisesFisher(
-            rot_modes, rot_concentration
-        )
+        self.rot_model = tfp.distributions.VonMisesFisher(rot_modes, rot_concentration)
         # self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
         self.pos_model = prior
         # self.pos_model = tfp.distributions.VonMisesFisher(
@@ -150,9 +145,7 @@ class BaseDensity(DensityModel[State]):
         chain = key_chain(key)
 
         rot = self.rot_model.sample(seed=next(chain))
-        rot = rot * jnp.sign(
-            jax.random.normal(next(chain), shape=(rot.shape[0], 1))
-        )
+        rot = rot * jnp.sign(jax.random.normal(next(chain), shape=(rot.shape[0], 1)))
         pos = self.pos_model.sample(seed=next(chain))
         # com = self.com_model.sample(seed=next(chain))
         ics = InternalCoordinates()
@@ -251,10 +244,6 @@ class TargetDensity(DensityModel[AugmentedData]):
         self.cutoff = cutoff_threshold
         self.prior = prior
 
-        # set simulation box
-        if self.sys_specs.fixed_box:
-            self.model.set_box(self.box)
-
     @property
     def box(self) -> SimulationBox:
         if self.data is None:
@@ -339,13 +328,9 @@ class TargetDensity(DensityModel[AugmentedData]):
                 force = None
 
             sign = jnp.sign(
-                jax.random.normal(
-                    next(chain), shape=(self.sys_specs.num_molecules, 1)
-                )
+                jax.random.normal(next(chain), shape=(self.sys_specs.num_molecules, 1))
             )
-            return Transformed(
-                AugmentedData(pos, com, aux, sign, box, force), energy
-            )
+            return Transformed(AugmentedData(pos, com, aux, sign, box, force), energy)
 
     @staticmethod
     def from_specs(

@@ -69,17 +69,19 @@ class OpenMMEnergyModel:
             ):
                 force.setDefaultTemperature(temperature)
         self.context = openmm.Context(model.system, integrator)
+        self.context.setPeriodicBoxVectors(*model.box)
+        self.context.setPositions(model.positions)
         self.error_handling = error_handling
 
     def set_softcore_cutoff(
         self,
         cutoff: float | None,
-        type: str,
-        keep_positions: bool = False,  # not really needed here
+        type: str = "",
         **kwargs,
     ):
         """
-        cutoff is in units of LJ sigma
+        cutoff is in units of LJ sigma.
+        available types are 'linear' and 'square', which requires setting 'slope'
         """
         my_lennard_jones = partial(
             lennard_jones, sigma=self.model.sigma_O, epsilon=self.model.epsilon_O
@@ -98,14 +100,12 @@ class OpenMMEnergyModel:
                     )
                 expr = get_approx_expr(
                     my_lennard_jones,
-                    approx_with_square,
+                    partial(approx_with_square, slope=kwargs["slope"]),
                     cutoff=cutoff * self.model.sigma_O,
-                    slope=kwargs["slope"],
                 )
             case _:
-                expr = parse_jaxpr(my_lennard_jones)
-
-        self.model.set_customLJ(expr, self.context, keep_positions=keep_positions)
+                expr = parse_jaxpr(my_lennard_jones)[0]
+        self.model.set_customLJ(expr, self.context)
 
     def set_box(self, box: SimulationBox):
         box_vectors = np.diag(np.array(box.size))

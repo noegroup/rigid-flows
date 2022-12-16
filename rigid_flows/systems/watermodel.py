@@ -58,10 +58,7 @@ class WaterModel:
                 file=stderr,
             )
         
-        xml_path = ""
-        if "noLJ" in water_type:
-            xml_path = "./" #set path to custom xml files
-        ff = openmm.app.ForceField(xml_path + water_type + ".xml")
+        ff = openmm.app.ForceField(water_type.removesuffix("-customLJ") + ".xml")
         system = ff.createSystem(
             topology,
             nonbondedMethod=openmm.app.PME,
@@ -69,39 +66,63 @@ class WaterModel:
             rigidWater=True,
             removeCMMotion=True,
         )
-        for force in system.getForces():
-            if isinstance(force, openmm.NonbondedForce):
-                force.setUseSwitchingFunction(False)
-                force.setUseDispersionCorrection(True)
-                force.setEwaldErrorTolerance(1e-4) #default is 5e-4
+        forces = {f.__class__.__name__: f for f in system.getForces()}
+        forces["NonbondedForce"].setUseSwitchingFunction(False)
+        forces["NonbondedForce"].setUseDispersionCorrection(True)
+        forces["NonbondedForce"].setEwaldErrorTolerance(1e-4) #default is 5e-4
+        oxygen_parameters = forces["NonbondedForce"].getParticleParameters(0)
+        self.charge_O = oxygen_parameters[0].value_in_unit(unit.elementary_charge)
+        self.sigma_O = oxygen_parameters[1].value_in_unit(unit.nanometer)
+        self.epsilon_O = oxygen_parameters[2].value_in_unit(unit.kilojoule_per_mole)
         
-        if linearize_below is not None:
-            sigma, epsilon = 0.316435, 0.680946 #tip4pew values
-            r_lin = linearize_below * sigma
-            if not 0 < r_lin < nonbondedCutoff:
-                raise ValueError(f"(linearize_below * {sigma}) must be smaller than the nonbondedCutoff={nonbondedCutoff}")
-            if not "noLJ" in water_type:
-                print(
-                    f"+++ WARNING: 'linearize_below' should be used with a 'noLJ' water type ({water_type}) +++",
-                    file=stderr,
+        if "customLJ" in water_type:
+            #remove LJ interaction
+            oxygen_parameters[2] *= 0 #set epsilon_0 to zero
+            for i in range(0, system.getNumParticles(), n_sites):
+                forces["NonbondedForce"].setParticleParameters(i, *oxygen_parameters)
+            
+            #add equivalent CustomNonbondedForce
+            Ulj_str = "4*epsilon*((sigma/r)^12-(sigma/r)^6)"
+            if linearize_below is None:
+                energy_expression = Ulj_str
+            else:
+                r_lin = linearize_below * self.sigma_O
+                if not 0 < r_lin < nonbondedCutoff:
+                    raise ValueError(f"(linearize_below * {self.sigma_O}) must be smaller than the nonbondedCutoff={nonbondedCutoff}")
+                energy_expression = (
+                    f"select(step(r-{r_lin}),Ulj_r,Ulj_r_lin+dUlj_r_lin*(r-{r_lin}));"
+                    f"Ulj_r={Ulj_str};"
+                    f"Ulj_r_lin=4*epsilon*((sigma/{r_lin})^12-(sigma/{r_lin})^6);"
+                    f"dUlj_r_lin=24*epsilon*((sigma/{r_lin})^7-(sigma/{r_lin})^13);"
                 )
-            lj_OO = openmm.CustomNonbondedForce(
-                f"step(dr)*Ulj_r+step(-dr)*(Ulj_r_lin+dUlj_r_lin*dr)-delta(dr)*Ulj_r_lin;"
-                f"dr=r-{r_lin};"
-                f"Ulj_r=4*{epsilon}*(({sigma}/r)^12-({sigma}/r)^6);"
-                f"Ulj_r_lin=4*{epsilon}*(({sigma}/{r_lin})^12-({sigma}/{r_lin})^6);"
-                f"dUlj_r_lin=24*{epsilon}*(({sigma}/{r_lin})^7-({sigma}/{r_lin})^13)"
-            )
+            energy_expression += "; epsilon=sqrt(epsilon1*epsilon2)"
+            lj_OO = openmm.CustomNonbondedForce(energy_expression)
             lj_OO.setNonbondedMethod(openmm.CustomNonbondedForce.CutoffPeriodic)
             lj_OO.setCutoffDistance(nonbondedCutoff)
             lj_OO.setUseLongRangeCorrection(True)
 
-            OOindices = np.arange(0, system.getNumParticles(), n_sites)
-            lj_OO.addInteractionGroup(OOindices, OOindices)
-            for _ in range(system.getNumParticles()):
-                lj_OO.addParticle()
+            # Oindices = np.arange(0, system.getNumParticles(), n_sites)
+            # lj_OO.addInteractionGroup(Oindices, Oindices) #for obscure reasons this does not work as it should
+            # for _ in range(system.getNumParticles()):
+            #     lj_OO.addParticle()
+            lj_OO.addGlobalParameter('sigma', self.sigma_O)
+            lj_OO.addPerParticleParameter('epsilon')
+            for i in range(system.getNumParticles()):
+                if i % n_sites == 0: #interact if oxygen
+                    lj_OO.addParticle([self.epsilon_O])
+                else: #do not interact otherwise
+                    lj_OO.addParticle([0])
+            bonds = []
+            for i in range(0, system.getNumParticles(), n_sites):
+                for j in range(1, n_sites):
+                    bonds.append((i, i+j))
+            lj_OO.createExclusionsFromBonds(bonds, 2)
             system.addForce(lj_OO)
-
+            forces = {f.__class__.__name__: f for f in system.getForces()}
+        else:
+            if linearize_below is not None:
+                raise ValueError(f"use water_type={water_type}-customLJ to set 'linearize_below'")
+        
         self.system = system
         self.topology = topology
         self.mdtraj_topology = mdtraj_topology
@@ -295,6 +316,23 @@ class WaterModel:
             )
 
         return simulation
+    
+    def set_customLJ(self, energy_expression, context=None, keep_positions=False):
+        """ energy_expression: the Lennard Jones expression, using only 'sigma' and 'epsilon' as parameters"""
+        
+        if "customLJ" not in self.water_type:
+            raise ValueError(f"use water_type={self.water_type}-customLJ to set custom LJ interactions")
+        
+        forces = {f.__class__.__name__: f for f in self.system.getForces()}
+        forces['CustomNonbondedForce'].setEnergyFunction(energy_expression + "; epsilon=sqrt(epsilon1*epsilon2)")
+        
+        if context is not None:
+            if keep_positions:
+                pos = context.getState(getPositions=True).getPositions()
+                context.reinitialize()
+                context.setPositions(pos)
+            else:
+                context.reinitialize()
 
     def plot_2Dview(self, pos=None, box=None, toPBC=False):
         if pos is None:
@@ -413,4 +451,3 @@ def plot_energy(ene):
     plt.xlabel("energy [kJ/mol]")
 
     plt.show()
-

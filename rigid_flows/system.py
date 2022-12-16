@@ -1,11 +1,12 @@
 import enum
+import inspect
 import logging
 from functools import partial
+from typing import Callable
 
 import jax
 import numpy as np
 import openmm  # type: ignore
-import openmm.app  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
@@ -67,14 +68,51 @@ class OpenMMEnergyModel:
                 ),
             ):
                 force.setDefaultTemperature(temperature)
-        self.simulation = openmm.app.Simulation(
-            model.topology, model.system, integrator
-        )
+        self.context = openmm.Context(model.system, integrator)
         self.error_handling = error_handling
+
+    def set_softcore_cutoff(
+        self,
+        cutoff: float | None, type: str,
+        *args,
+        reinitialize_context: bool = True,
+        keep_positions: bool = False,
+        **kwargs
+    ):
+        match type:
+            case "linear":
+                expr = parse_jaxpr(
+                    approx(lennard_jones,
+                           approx_with_linear,
+                           cutoff=cutoff * self.model.sigma_O,
+                           epsilon=self.model.epsilon_O,
+                           sigma=self.model.sigma_O),
+                    var_names=("r", "epsilon", "sigma")
+                )
+            case "square":
+                if "slope" not in kwargs:
+                    raise ValueError("slope' needed in kwargs when using square approximation.")
+                slope = kwargs["slope"]
+                expr = parse_jaxpr(
+                    approx(lennard_jones,
+                           approx_with_square,
+                           cutoff=cutoff * self.model.sigma_O,
+                           epsilon=self.model.epsilon_O,
+                           sigma=self.model.sigma_O,
+                           slope=slope),
+                    var_names=("r", "epsilon", "sigma")
+                )
+            case _:
+                expr = parse_jaxpr(lennard_jones, var_names=("r", "epsilon", "sigma"))
+        if reinitialize_context:
+            context = self.context
+        else:
+            context = None
+        self.model.set_customLJ(expr, context, keep_positions)
 
     def set_box(self, box: SimulationBox):
         box_vectors = np.diag(np.array(box.size))
-        self.simulation.context.setPeriodicBoxVectors(*box_vectors)
+        self.context.setPeriodicBoxVectors(*box_vectors)
 
     def compute_energies_and_forces(
         self,
@@ -90,7 +128,7 @@ class OpenMMEnergyModel:
 
         if box is not None:
             assert box.shape == (3, 3), f"box.shape = {box.shape}"
-            self.simulation.context.setPeriodicBoxVectors(*box)
+            self.context.setPeriodicBoxVectors(*box)
 
         # iterate over batch dimension
         for i in range(len(pos)):
@@ -99,10 +137,10 @@ class OpenMMEnergyModel:
             force = jnp.empty_like(forces[i])
 
             try:
-                self.simulation.context.setPositions(pos[i])
-                # self.simulation.context.computeVirtualSites()
+                self.context.setPositions(pos[i])
+                # self.context.computeVirtualSites()
 
-                state = self.simulation.context.getState(
+                state = self.context.getState(
                     getEnergy=True, getForces=True
                 )
                 energy = (
@@ -188,3 +226,93 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
     eval.defvjp(eval_fwd, eval_bwd)
 
     return eval
+
+def lennard_jones(r, sigma, epsilon):
+    return 4 * epsilon * ( (sigma/r) ** 12 - (sigma/r) ** 6)
+
+
+def parse_jaxpr(fn: Callable, var_names: tuple[str] | None = None, symbols: dict = {}):
+
+    if var_names is None:
+        sig = inspect.signature(fn)
+        var_names = tuple(sig.parameters.keys())
+
+    args = tuple(
+        jax.ShapedArray((), dtype=jnp.float32)
+        for _ in var_names
+    )
+    jaxpr = jax.make_jaxpr(fn)(*args)
+    symbols = {
+        str(sym): val if val not in symbols else symbols[val]
+        for (sym, val) in zip(jaxpr.jaxpr.invars, var_names)
+    }
+
+    def fetch_symbol(arg):
+        if isinstance(arg, jax.core.Var):
+            return symbols[str(arg)]
+        elif isinstance(arg, jax.core.Literal):
+            return str(arg)
+        else:
+            raise ValueError()
+    
+    for eqn in jaxpr.eqns:
+        match eqn.primitive.name:
+            case "mul":
+                fst, snd = map(fetch_symbol, eqn.invars)
+                out = str(eqn.outvars[0])
+                symbols[out] = f"({fst} * {snd})"
+            case "div":
+                fst, snd = map(fetch_symbol, eqn.invars)
+                out = str(eqn.outvars[0])
+                symbols[out] = f"({fst} / {snd})"
+            case "integer_pow":
+                fst, = map(fetch_symbol, eqn.invars)
+                exp = str(eqn.params['y'])
+                out = str(eqn.outvars[0])
+                symbols[out] = f"{fst}^{exp}"
+            case "sub":
+                fst, snd = map(fetch_symbol, eqn.invars)
+                out = str(eqn.outvars[0])
+                symbols[out] = f"({fst} - {snd})"
+            case "add":
+                fst, snd = map(fetch_symbol, eqn.invars)
+                out = str(eqn.outvars[0])
+                symbols[out] = f"({fst} + {snd})"
+            case "convert_element_type":
+                fst, = map(fetch_symbol, eqn.invars)
+                out = str(eqn.outvars[0])
+                symbols[out] = f"{fst}"
+            case _:
+                raise ValueError(eqn.primitive.name)
+
+    return tuple(map(fetch_symbol, jaxpr.jaxpr.outvars))
+
+def approx_with_square(original, cutoff: Array, slope: float):
+    y0, dyx0 = jax.value_and_grad(original)(cutoff)
+    a = slope
+    b = dyx0 - 2 * a * cutoff
+    c = y0 - a * cutoff ** 2 - b * cutoff
+
+    def approx(r):
+        return a * r ** 2 + b * r + c
+
+    return approx
+
+def approx_with_linear(original, cutoff: Array):
+    y0, dyx0 = jax.value_and_grad(original)(cutoff)
+    a = dyx0
+    b = y0 - a * cutoff
+
+    def approx(r):
+        return a * r + b 
+
+    return approx
+
+def approx(fun, approximation, cutoff, **kwargs):
+    original = parse_jaxpr(fun)[0]
+    fun_ = partial(fun, **kwargs)
+    approx = parse_jaxpr(approximation(fun_, cutoff))[0]
+    sig = inspect.signature(fun)
+    inp = tuple(sig.parameters.keys())[0]
+    filter = f"step({inp} - {cutoff})"
+    return f"select({filter}, {original}, {approx})"

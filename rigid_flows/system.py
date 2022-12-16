@@ -73,42 +73,39 @@ class OpenMMEnergyModel:
 
     def set_softcore_cutoff(
         self,
-        cutoff: float | None, type: str,
-        *args,
-        reinitialize_context: bool = True,
-        keep_positions: bool = False,
-        **kwargs
+        cutoff: float | None,
+        type: str,
+        keep_positions: bool = False,  # not really needed here
+        **kwargs,
     ):
+        """
+        cutoff is in units of LJ sigma
+        """
+        my_lennard_jones = partial(
+            lennard_jones, sigma=self.model.sigma_O, epsilon=self.model.epsilon_O
+        )
         match type:
             case "linear":
-                expr = parse_jaxpr(
-                    approx(lennard_jones,
-                           approx_with_linear,
-                           cutoff=cutoff * self.model.sigma_O,
-                           epsilon=self.model.epsilon_O,
-                           sigma=self.model.sigma_O),
-                    var_names=("r", "epsilon", "sigma")
+                expr = get_approx_expr(
+                    my_lennard_jones,
+                    approx_with_linear,
+                    cutoff=cutoff * self.model.sigma_O,
                 )
             case "square":
                 if "slope" not in kwargs:
-                    raise ValueError("slope' needed in kwargs when using square approximation.")
-                slope = kwargs["slope"]
-                expr = parse_jaxpr(
-                    approx(lennard_jones,
-                           approx_with_square,
-                           cutoff=cutoff * self.model.sigma_O,
-                           epsilon=self.model.epsilon_O,
-                           sigma=self.model.sigma_O,
-                           slope=slope),
-                    var_names=("r", "epsilon", "sigma")
+                    raise ValueError(
+                        "'slope' needed in kwargs when using square approximation."
+                    )
+                expr = get_approx_expr(
+                    my_lennard_jones,
+                    approx_with_square,
+                    cutoff=cutoff * self.model.sigma_O,
+                    slope=kwargs["slope"],
                 )
             case _:
-                expr = parse_jaxpr(lennard_jones, var_names=("r", "epsilon", "sigma"))
-        if reinitialize_context:
-            context = self.context
-        else:
-            context = None
-        self.model.set_customLJ(expr, context, keep_positions)
+                expr = parse_jaxpr(my_lennard_jones)
+
+        self.model.set_customLJ(expr, self.context, keep_positions=keep_positions)
 
     def set_box(self, box: SimulationBox):
         box_vectors = np.diag(np.array(box.size))
@@ -140,13 +137,9 @@ class OpenMMEnergyModel:
                 self.context.setPositions(pos[i])
                 # self.context.computeVirtualSites()
 
-                state = self.context.getState(
-                    getEnergy=True, getForces=True
-                )
+                state = self.context.getState(getEnergy=True, getForces=True)
                 energy = (
-                    state.getPotentialEnergy().value_in_unit(
-                        unit.kilojoule_per_mole
-                    )
+                    state.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
                     / self.kbT
                 )
                 force = (
@@ -178,9 +171,7 @@ class OpenMMEnergyModel:
 
 
 def wrap_openmm_model(model: OpenMMEnergyModel):
-    def compute_energy_and_forces(
-        pos: Array, box: Array | None, has_batch_dim: bool
-    ):
+    def compute_energy_and_forces(pos: Array, box: Array | None, has_batch_dim: bool):
 
         if box is not None:
             assert box.shape == (3,)
@@ -227,24 +218,26 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
 
     return eval
 
+
 def lennard_jones(r, sigma, epsilon):
-    return 4 * epsilon * ( (sigma/r) ** 12 - (sigma/r) ** 6)
+    return 4 * epsilon * ((sigma / r) ** 12 - (sigma / r) ** 6)
 
 
-def parse_jaxpr(fn: Callable, var_names: tuple[str] | None = None, symbols: dict = {}):
+def parse_jaxpr(fn: Callable, args: tuple[str] | None = None, symbols: dict = {}):
 
-    if var_names is None:
+    placeholders = []
+
+    if args is None:
         sig = inspect.signature(fn)
-        var_names = tuple(sig.parameters.keys())
+        for key, val in sig.parameters.items():
+            if val.default == inspect._empty:
+                placeholders.append(key)
 
-    args = tuple(
-        jax.ShapedArray((), dtype=jnp.float32)
-        for _ in var_names
-    )
-    jaxpr = jax.make_jaxpr(fn)(*args)
+    jaxpr_kwargs = {key: jax.ShapedArray((), dtype=jnp.float32) for key in placeholders}
+    jaxpr = jax.make_jaxpr(fn)(**jaxpr_kwargs)
     symbols = {
         str(sym): val if val not in symbols else symbols[val]
-        for (sym, val) in zip(jaxpr.jaxpr.invars, var_names)
+        for (sym, val) in zip(jaxpr.jaxpr.invars, placeholders)
     }
 
     def fetch_symbol(arg):
@@ -254,7 +247,7 @@ def parse_jaxpr(fn: Callable, var_names: tuple[str] | None = None, symbols: dict
             return str(arg)
         else:
             raise ValueError()
-    
+
     for eqn in jaxpr.eqns:
         match eqn.primitive.name:
             case "mul":
@@ -266,8 +259,8 @@ def parse_jaxpr(fn: Callable, var_names: tuple[str] | None = None, symbols: dict
                 out = str(eqn.outvars[0])
                 symbols[out] = f"({fst} / {snd})"
             case "integer_pow":
-                fst, = map(fetch_symbol, eqn.invars)
-                exp = str(eqn.params['y'])
+                (fst,) = map(fetch_symbol, eqn.invars)
+                exp = str(eqn.params["y"])
                 out = str(eqn.outvars[0])
                 symbols[out] = f"{fst}^{exp}"
             case "sub":
@@ -279,7 +272,7 @@ def parse_jaxpr(fn: Callable, var_names: tuple[str] | None = None, symbols: dict
                 out = str(eqn.outvars[0])
                 symbols[out] = f"({fst} + {snd})"
             case "convert_element_type":
-                fst, = map(fetch_symbol, eqn.invars)
+                (fst,) = map(fetch_symbol, eqn.invars)
                 out = str(eqn.outvars[0])
                 symbols[out] = f"{fst}"
             case _:
@@ -287,16 +280,18 @@ def parse_jaxpr(fn: Callable, var_names: tuple[str] | None = None, symbols: dict
 
     return tuple(map(fetch_symbol, jaxpr.jaxpr.outvars))
 
+
 def approx_with_square(original, cutoff: Array, slope: float):
     y0, dyx0 = jax.value_and_grad(original)(cutoff)
     a = slope
     b = dyx0 - 2 * a * cutoff
-    c = y0 - a * cutoff ** 2 - b * cutoff
+    c = y0 - a * cutoff**2 - b * cutoff
 
     def approx(r):
-        return a * r ** 2 + b * r + c
+        return a * r**2 + b * r + c
 
     return approx
+
 
 def approx_with_linear(original, cutoff: Array):
     y0, dyx0 = jax.value_and_grad(original)(cutoff)
@@ -304,11 +299,12 @@ def approx_with_linear(original, cutoff: Array):
     b = y0 - a * cutoff
 
     def approx(r):
-        return a * r + b 
+        return a * r + b
 
     return approx
 
-def approx(fun, approximation, cutoff, **kwargs):
+
+def get_approx_expr(fun, approximation, cutoff, **kwargs):
     original = parse_jaxpr(fun)[0]
     fun_ = partial(fun, **kwargs)
     approx = parse_jaxpr(approximation(fun_, cutoff))[0]

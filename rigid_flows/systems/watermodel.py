@@ -25,7 +25,6 @@ class WaterModel:
         positions,
         box,
         water_type="tip4pew",
-        linearize_below=None,
         nonbondedCutoff=1,
         barostat=None,
         external_field=None,
@@ -57,7 +56,7 @@ class WaterModel:
                 f"+++ WARNING: `nonbondedCutoff` too large, changed to {nonbondedCutoff} +++",
                 file=stderr,
             )
-        
+
         ff = openmm.app.ForceField(water_type.removesuffix("-customLJ") + ".xml")
         system = ff.createSystem(
             topology,
@@ -69,33 +68,21 @@ class WaterModel:
         forces = {f.__class__.__name__: f for f in system.getForces()}
         forces["NonbondedForce"].setUseSwitchingFunction(False)
         forces["NonbondedForce"].setUseDispersionCorrection(True)
-        forces["NonbondedForce"].setEwaldErrorTolerance(1e-4) #default is 5e-4
+        forces["NonbondedForce"].setEwaldErrorTolerance(1e-4)  # default is 5e-4
         oxygen_parameters = forces["NonbondedForce"].getParticleParameters(0)
         self.charge_O = oxygen_parameters[0].value_in_unit(unit.elementary_charge)
         self.sigma_O = oxygen_parameters[1].value_in_unit(unit.nanometer)
         self.epsilon_O = oxygen_parameters[2].value_in_unit(unit.kilojoule_per_mole)
-        
+
         if "customLJ" in water_type:
-            #remove LJ interaction
-            oxygen_parameters[2] *= 0 #set epsilon_0 to zero
+            # remove LJ interaction
+            oxygen_parameters[2] *= 0  # set epsilon_O to zero
             for i in range(0, system.getNumParticles(), n_sites):
                 forces["NonbondedForce"].setParticleParameters(i, *oxygen_parameters)
-            
-            #add equivalent CustomNonbondedForce
-            Ulj_str = "4*epsilon*((sigma/r)^12-(sigma/r)^6)"
-            if linearize_below is None:
-                energy_expression = Ulj_str
-            else:
-                r_lin = linearize_below * self.sigma_O
-                if not 0 < r_lin < nonbondedCutoff:
-                    raise ValueError(f"(linearize_below * {self.sigma_O}) must be smaller than the nonbondedCutoff={nonbondedCutoff}")
-                energy_expression = (
-                    f"select(step(r-{r_lin}),Ulj_r,Ulj_r_lin+dUlj_r_lin*(r-{r_lin}));"
-                    f"Ulj_r={Ulj_str};"
-                    f"Ulj_r_lin=4*epsilon*((sigma/{r_lin})^12-(sigma/{r_lin})^6);"
-                    f"dUlj_r_lin=24*epsilon*((sigma/{r_lin})^7-(sigma/{r_lin})^13);"
-                )
-            energy_expression += "; epsilon=sqrt(epsilon1*epsilon2)"
+
+            # add equivalent CustomNonbondedForce
+            Ulj_str = f"4*{self.epsilon_O}*(({self.sigma_O}/r)^12-({self.sigma_O}/r)^6)"
+            energy_expression = f"select(isOxy1*isOxy2, {Ulj_str}, 0)"
             lj_OO = openmm.CustomNonbondedForce(energy_expression)
             lj_OO.setNonbondedMethod(openmm.CustomNonbondedForce.CutoffPeriodic)
             lj_OO.setCutoffDistance(nonbondedCutoff)
@@ -105,24 +92,20 @@ class WaterModel:
             # lj_OO.addInteractionGroup(Oindices, Oindices) #for obscure reasons this does not work as it should
             # for _ in range(system.getNumParticles()):
             #     lj_OO.addParticle()
-            lj_OO.addGlobalParameter('sigma', self.sigma_O)
-            lj_OO.addPerParticleParameter('epsilon')
+            lj_OO.addPerParticleParameter("isOxy")
             for i in range(system.getNumParticles()):
-                if i % n_sites == 0: #interact if oxygen
-                    lj_OO.addParticle([self.epsilon_O])
-                else: #do not interact otherwise
+                if i % n_sites == 0:
+                    lj_OO.addParticle([1])
+                else:
                     lj_OO.addParticle([0])
             bonds = []
             for i in range(0, system.getNumParticles(), n_sites):
                 for j in range(1, n_sites):
-                    bonds.append((i, i+j))
+                    bonds.append((i, i + j))
             lj_OO.createExclusionsFromBonds(bonds, 2)
             system.addForce(lj_OO)
             forces = {f.__class__.__name__: f for f in system.getForces()}
-        else:
-            if linearize_below is not None:
-                raise ValueError(f"use water_type={water_type}-customLJ to set 'linearize_below'")
-        
+
         self.system = system
         self.topology = topology
         self.mdtraj_topology = mdtraj_topology
@@ -132,15 +115,12 @@ class WaterModel:
 
         self._positions = np.array(positions)
         self._box = np.array(box)
-        self.is_box_orthorombic = not np.count_nonzero(
-            box - np.diag(np.diagonal(box))
-        )
+        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diagonal(box)))
 
         self.n_waters = n_waters
         self.n_sites = n_sites
         self.n_atoms = n_waters * n_sites
         self.water_type = water_type
-        self.linearize_below = linearize_below
         self.nonbondedCutoff = nonbondedCutoff
 
     @property
@@ -160,9 +140,7 @@ class WaterModel:
         self._box = np.array(box)
         self.topology.setPeriodicBoxVectors(box)
         self.system.setDefaultPeriodicBoxVectors(*box)
-        self.is_box_orthorombic = not np.count_nonzero(
-            box - np.diag(np.diagonal(box))
-        )
+        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diagonal(box)))
 
     @staticmethod
     def generate_mdtraj_topology(n_waters, n_sites=4):
@@ -209,14 +187,10 @@ class WaterModel:
         if barostat is None:
             pass
         elif barostat == "iso":
-            self.system.addForce(
-                openmm.MonteCarloBarostat(pressure, temperature)
-            )
+            self.system.addForce(openmm.MonteCarloBarostat(pressure, temperature))
         elif barostat == "aniso":
             self.system.addForce(
-                openmm.MonteCarloAnisotropicBarostat(
-                    3 * [pressure], temperature
-                )
+                openmm.MonteCarloAnisotropicBarostat(3 * [pressure], temperature)
             )
         elif barostat == "tri":
             self.system.addForce(
@@ -262,7 +236,6 @@ class WaterModel:
             "positions": self._positions.tolist(),
             "box": self._box.tolist(),
             "water_type": self.water_type,
-            "linearize_below": self.linearize_below,
             "nonbondedCutoff": self.nonbondedCutoff,
             "barostat": self.barostat,
             "external_field": self.external_field,
@@ -316,16 +289,20 @@ class WaterModel:
             )
 
         return simulation
-    
+
     def set_customLJ(self, energy_expression, context=None, keep_positions=False):
-        """ energy_expression: the Lennard Jones expression, using only 'sigma' and 'epsilon' as parameters"""
-        
+        """energy_expression: the new Lennard Jones expression, using 'r' for atoms distance"""
+
         if "customLJ" not in self.water_type:
-            raise ValueError(f"use water_type={self.water_type}-customLJ to set custom LJ interactions")
-        
+            raise ValueError(
+                f"use water_type={self.water_type}-customLJ to set custom LJ interactions"
+            )
+
         forces = {f.__class__.__name__: f for f in self.system.getForces()}
-        forces['CustomNonbondedForce'].setEnergyFunction(energy_expression + "; epsilon=sqrt(epsilon1*epsilon2)")
-        
+        forces["CustomNonbondedForce"].setEnergyFunction(
+            f"select(isOxy1*isOxy2, {energy_expression}, 0)"
+        )
+
         if context is not None:
             if keep_positions:
                 pos = context.getState(getPositions=True).getPositions()
@@ -341,25 +318,25 @@ class WaterModel:
             box = self._box
 
         if len(pos.squeeze().shape) == 2:
-            marker = 'o'
+            marker = "o"
             alpha = 1
         elif len(pos.squeeze().shape) == 3:
-            marker = '.'
+            marker = "."
             alpha = 0.05
         else:
-            raise ValueError('pos should be of shape (nframes, natoms, 3)')
+            raise ValueError("pos should be of shape (nframes, natoms, 3)")
         if pos.shape[-1] != 3:
-            raise ValueError('pos should be in 3D')
+            raise ValueError("pos should be in 3D")
 
         av_box = box.mean(axis=0) if len(box.shape) == 3 else box
         if av_box.shape != (3, 3):
-            raise ValueError('box should be a 3x3 matrix')
+            raise ValueError("box should be a 3x3 matrix")
 
         if toPBC:
             if self.is_box_orthorombic:
                 mypos = (pos / np.diagonal(av_box) % 1) * np.diagonal(av_box)
             else:
-                raise NotImplementedError('only available for fixed orthorombic box')
+                raise NotImplementedError("only available for fixed orthorombic box")
         else:
             mypos = pos
 
@@ -367,39 +344,57 @@ class WaterModel:
         for i in range(3):
             ii = (i + 1) % 3
             iii = (i + 2) % 3
-            plt.subplot(1, 3, 1+i)
+            plt.subplot(1, 3, 1 + i)
 
-            #draw particles
-            plt.scatter(mypos[..., 1::self.n_sites, i], mypos[..., 1::self.n_sites, ii], marker=marker, alpha=alpha, c='gray')
-            plt.scatter(mypos[..., 2::self.n_sites, i], mypos[..., 2::self.n_sites, ii], marker=marker, alpha=alpha, c='gray')
-            plt.scatter(mypos[..., ::self.n_sites, i], mypos[..., ::self.n_sites, ii], marker=marker, alpha=alpha, c='r')
+            # draw particles
+            plt.scatter(
+                mypos[..., 1 :: self.n_sites, i],
+                mypos[..., 1 :: self.n_sites, ii],
+                marker=marker,
+                alpha=alpha,
+                c="gray",
+            )
+            plt.scatter(
+                mypos[..., 2 :: self.n_sites, i],
+                mypos[..., 2 :: self.n_sites, ii],
+                marker=marker,
+                alpha=alpha,
+                c="gray",
+            )
+            plt.scatter(
+                mypos[..., :: self.n_sites, i],
+                mypos[..., :: self.n_sites, ii],
+                marker=marker,
+                alpha=alpha,
+                c="r",
+            )
 
-            #draw box
+            # draw box
             coord = [
                 [0, 0],
-                [av_box[i,i], av_box[i,ii]],
-                [av_box[i,i] + av_box[ii,i], av_box[i,ii] + av_box[ii,ii]],
-                [av_box[ii,i], av_box[ii,ii]],
-                [0, 0]
+                [av_box[i, i], av_box[i, ii]],
+                [av_box[i, i] + av_box[ii, i], av_box[i, ii] + av_box[ii, ii]],
+                [av_box[ii, i], av_box[ii, ii]],
+                [0, 0],
             ]
             xs, ys = zip(*coord)
-            plt.plot(xs, ys, 'k:')
+            plt.plot(xs, ys, "k:")
             if not self.is_box_orthorombic:
                 coord2 = [
                     coord[1],
-                    [coord[1][0] + av_box[iii,i], coord[1][1] + av_box[iii,ii]],
-                    [coord[2][0] + av_box[iii,i], coord[2][1] + av_box[iii,ii]],
-                    [coord[3][0] + av_box[iii,i], coord[3][1] + av_box[iii,ii]],
+                    [coord[1][0] + av_box[iii, i], coord[1][1] + av_box[iii, ii]],
+                    [coord[2][0] + av_box[iii, i], coord[2][1] + av_box[iii, ii]],
+                    [coord[3][0] + av_box[iii, i], coord[3][1] + av_box[iii, ii]],
                     coord[3],
                 ]
                 xs, ys = zip(*coord2)
-                plt.plot(xs, ys, 'k:')
+                plt.plot(xs, ys, "k:")
                 coord = [coord[2], coord2[2]]
                 xs, ys = zip(*coord)
-                plt.plot(xs, ys, 'k:')
+                plt.plot(xs, ys, "k:")
 
-            plt.xlabel(f'x{i} [nm]')
-            plt.ylabel(f'x{ii} [nm]')
+            plt.xlabel(f"x{i} [nm]")
+            plt.ylabel(f"x{ii} [nm]")
             plt.gca().set_aspect(1)
         plt.show()
 
@@ -414,14 +409,16 @@ class WaterModel:
 
         return traj
 
-    def plot_rdf(self, pos=None, box=None, r_range=[0,1], selection='name == O', **kwargs):
+    def plot_rdf(
+        self, pos=None, box=None, r_range=[0, 1], selection="name == O", **kwargs
+    ):
         traj = self.get_mdtraj(pos, box)
         ij = self.mdtraj_topology.select_pairs(selection, selection)
         rdf = md.compute_rdf(traj, ij, r_range=r_range)
 
         plt.plot(*rdf, **kwargs)
-        plt.ylabel('g(r)')
-        plt.xlabel('r [nm]')
+        plt.ylabel("g(r)")
+        plt.xlabel("r [nm]")
         plt.xlim(r_range)
 
     def get_view(self, pos=None, box=None):

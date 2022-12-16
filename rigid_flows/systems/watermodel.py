@@ -29,7 +29,7 @@ class WaterModel:
         barostat=None,
         external_field=None,
     ):
-        if water_type not in ["tip3p", "tip4pew", "tip5p", "spce", "tip4pew-noLJ"]:
+        if water_type not in ["tip3p", "tip4pew", "tip5p", "spce", "tip4pew-customLJ"]:
             print(
                 f"+++ WARNING: Unknown water_type `{water_type}` +++",
                 file=stderr,

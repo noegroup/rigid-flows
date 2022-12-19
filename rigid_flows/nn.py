@@ -49,6 +49,66 @@ ACTIVATION_FUNCTIONS = {
 }
 
 
+from flox._src import bulk
+
+
+class Conv(eqx.Module):
+
+    encoder_kernel: Array
+    inner_kernel: Array
+    decoder_kernel: Array
+
+    def __init__(
+        self,
+        seq_len: int,
+        num_inp: int,
+        num_out: int,
+        num_hidden: int,
+        activation: str,
+        num_blocks: int = 0,
+        reduce_output: bool = False,
+        *,
+        key: KeyArray,
+    ):
+        chain = key_chain(key)
+
+        num_inner = 1
+        window_size = 3
+        self.encoder_kernel = jax.random.normal(
+            next(chain), shape=(window_size,) * 3 + (32, num_inp)
+        )
+        self.inner_kernel = jax.random.normal(
+            next(chain), shape=(num_inner,) + (window_size,) * 3 + (32, 32)
+        )
+        self.decoder_kernel = jax.random.normal(
+            next(chain), shape=(window_size,) * 3 + (num_out, 32)
+        )
+
+    def __call__(self, pos: Array, input: Array):
+        resolution = (8, 8, 8)
+        # raise ValueError(input.shape)
+        # raise ValueError(pos.shape, input.shape)
+        idxs = jax.vmap(bulk.lattice_indices, in_axes=(0, None, None))(
+            pos, bulk.neighbors(pos.shape[-1]), resolution
+        )
+        weights = jax.vmap(bulk.lattice_weights, in_axes=(0, 0, None))(
+            pos, idxs, resolution
+        )
+        img = bulk.scatter(input, weights, idxs, resolution)
+        out = bulk.conv_nd(img, self.encoder_kernel)
+        for kernel in self.inner_kernel:
+            res = out
+            out = bulk.conv_nd(out, kernel)
+            out = res + jax.nn.silu(out)
+        out = bulk.conv_nd(out, self.decoder_kernel)
+
+        out = bulk.gather(out, idxs, bulk.lattice.AggregationMethod.Nothing)
+        out = out.sum(axis=1)
+
+        out = out.reshape(input.shape[0], -1)
+        return out
+
+
 class Dense(eqx.Module):
     """Stack of transformer layers.
 

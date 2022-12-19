@@ -49,7 +49,7 @@ model:
 
     # coupling layers
     couplings:
-      - num_repetitions: 1
+      - num_repetitions: 2
         auxiliary_update:
           seq_len: 16
           activation: silu

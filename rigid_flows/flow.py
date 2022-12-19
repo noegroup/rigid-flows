@@ -30,7 +30,7 @@ from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .lowrank import LowRankFlow  # type: ignore
-from .nn import Dense, QuatEncoder
+from .nn import Conv, Dense, QuatEncoder
 from .specs import (
     CouplingSpecification,
     FlowSpecification,
@@ -259,7 +259,7 @@ class ActNorm(eqx.Module):
 
     def initialize(self, batch: State):
         val = self.lens.get()(batch)
-        std = 1e-6 + jnp.std(val, axis=0)
+        std = jnp.std(val, axis=0)
         log_std = jnp.log(jnp.exp(std) - 1)
         return ActNorm(
             self.lens,
@@ -392,7 +392,7 @@ class AuxUpdate(eqx.Module):
     """Flow layer updating the auxiliary part of a state"""
 
     symmetrizer: QuatEncoder
-    net: Dense | eqx.nn.Sequential
+    net: Conv  # Dense | eqx.nn.Sequential | Conv
     auxiliary_shape: tuple[int, ...]
     num_low_rank: int
     low_rank_regularizer: float
@@ -428,12 +428,9 @@ class AuxUpdate(eqx.Module):
         self.num_low_rank = num_low_rank
         self.low_rank_regularizer = low_rank_regularizer
         self.transform = transform
-        self.net = Dense(
+        self.net = Conv(
             num_inp=num_dims + num_pos,
-            # num_out=(2 + 2 * self.num_low_rank) * auxiliary_shape[-1],
-            num_out=auxiliary_shape[-1]
-            + kwargs["seq_len"]
-            + auxiliary_shape[-1] ** 2,
+            num_out=2 * auxiliary_shape[-1],
             key=next(chain),
             reduce_output=False,
             **kwargs,
@@ -451,32 +448,18 @@ class AuxUpdate(eqx.Module):
         """
         pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats).reshape(-1)
+        out = self.net(pos, feats).reshape(input.aux.shape[0], -1)
 
-        splits = tuple(
-            accumulate(
-                [prod(self.auxiliary_shape), self.seq_len * self.seq_len]
-            )
-        )
-        shift, atom_mixer, dim_mixer = jnp.split(out, splits, axis=-1)  # type: ignore
-        atom_mixer = atom_mixer.reshape(self.seq_len, self.seq_len) * 1e-1
-        dim_mixer = (
-            dim_mixer.reshape(
-                self.seq_len, self.auxiliary_shape[-1], self.auxiliary_shape[-1]
-            )
-            * 1e-1
-        )
-        shift = shift.reshape(input.aux.shape) * 1e-1
-        return shift, atom_mixer, dim_mixer
+        shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
+        scale = scale.reshape(input.aux.shape) * 1e-1
+        return shift, scale
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        shift, atom_mixer, dim_mixer = self.params(input)
+        shift, scale = self.params(input)
         pipe = Pipe(
             [
-                LDU(atom_mixer, "left"),
-                Affine(shift, jnp.zeros_like(shift)),
-                VectorizedTransform(LDU(dim_mixer, "right")),
+                Affine(shift, scale),
             ]
         )
         aux, ldj = unpack(pipe.forward(input.aux))
@@ -484,12 +467,10 @@ class AuxUpdate(eqx.Module):
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        shift, atom_mixer, dim_mixer = self.params(input)
+        shift, scale = self.params(input)
         pipe = Pipe(
             [
-                LDU(atom_mixer, "left"),
-                Affine(shift, jnp.zeros_like(shift)),
-                VectorizedTransform(LDU(dim_mixer, "right")),
+                Affine(shift, scale),
             ]
         )
         aux, ldj = unpack(pipe.inverse(input.aux))
@@ -500,7 +481,8 @@ class PosUpdate(eqx.Module):
     """Flow layer updating the position part of a state"""
 
     symmetrizer: QuatEncoder
-    net: Dense
+    # net: Dense
+    net: Conv
     num_low_rank: int
     low_rank_regularizer: float
     transform: str
@@ -533,10 +515,10 @@ class PosUpdate(eqx.Module):
         self.num_low_rank = num_low_rank
         chain = key_chain(key)
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
-        self.net = Dense(
+        self.net = Conv(
             num_inp=num_dims + auxiliary_shape[-1],
             # num_out=(2 + 2 * num_low_rank) * num_pos,
-            num_out=num_pos + kwargs["seq_len"] + num_pos**2,
+            num_out=2 * num_pos,
             key=next(chain),
             **kwargs,
         )
@@ -558,31 +540,19 @@ class PosUpdate(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
 
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats)
-        out = out.reshape(-1)
+        out = self.net(input.pos, feats).reshape(input.pos.shape[0], -1)
 
-        splits = tuple(
-            accumulate([prod(input.pos.shape), self.seq_len * self.seq_len])
-        )
-        shift, atom_mixer, dim_mixer = jnp.split(out, splits, axis=-1)  # type: ignore
-        atom_mixer = atom_mixer.reshape(self.seq_len, self.seq_len) * 1e-1
-        dim_mixer = (
-            dim_mixer.reshape(
-                self.seq_len, input.pos.shape[-1], input.pos.shape[-1]
-            )
-            * 1e-1
-        )
-        shift = shift.reshape(input.pos.shape) * 1e-1
-        return shift, atom_mixer, dim_mixer
+        shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
+        shift = shift.reshape(input.pos.shape)
+        scale = shift.reshape(input.pos.shape) * 1e-1
+        return shift, scale
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        shift, atom_mixer, dim_mixer = self.params(input)
+        shift, scale = self.params(input)
         pipe = Pipe(
             [
-                LDU(atom_mixer, "left"),
-                Affine(shift, jnp.zeros_like(shift)),
-                VectorizedTransform(LDU(dim_mixer, "right")),
+                Affine(shift, scale),
             ]
         )
         pos, ldj = unpack(pipe.forward(input.pos))
@@ -590,12 +560,10 @@ class PosUpdate(eqx.Module):
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        shift, atom_mixer, dim_mixer = self.params(input)
+        shift, scale = self.params(input)
         pipe = Pipe(
             [
-                LDU(atom_mixer, "left"),
-                Affine(shift, jnp.zeros_like(shift)),
-                VectorizedTransform(LDU(dim_mixer, "right")),
+                Affine(shift, scale),
             ]
         )
         pos, ldj = unpack(pipe.inverse(input.pos))
@@ -608,7 +576,8 @@ class PositionEncoder(eqx.Module):
     which are predicted from auxiliaries
     """
 
-    net: Dense
+    # net: Dense
+    net: Conv
 
     def __init__(
         self,
@@ -633,7 +602,7 @@ class PositionEncoder(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         chain = key_chain(key)
-        self.net = Dense(
+        self.net = Conv(
             num_inp=auxiliary_shape[-1],
             num_out=num_pos,
             key=next(chain),
@@ -653,7 +622,7 @@ class PositionEncoder(eqx.Module):
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
         feats = jnp.concatenate([aux], axis=-1)
-        out = self.net(feats)
+        out = self.net(input.aux, feats)
         center = out.reshape(input.pos.shape)
         return center
 

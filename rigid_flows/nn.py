@@ -1,3 +1,5 @@
+from cmath import sqrt
+
 import equinox as eqx
 import jax
 from jax import numpy as jnp
@@ -76,13 +78,13 @@ class Conv(eqx.Module):
         window_size = 3
         self.encoder_kernel = jax.random.normal(
             next(chain), shape=(window_size,) * 3 + (32, num_inp)
-        )
+        ) / sqrt(27 * 32 * num_inp)
         self.inner_kernel = jax.random.normal(
             next(chain), shape=(num_inner,) + (window_size,) * 3 + (32, 32)
-        )
+        ) / sqrt(27 * 2 * 32)
         self.decoder_kernel = jax.random.normal(
             next(chain), shape=(window_size,) * 3 + (num_out, 32)
-        )
+        ) / sqrt(27 * 32 * 32)
 
     def __call__(self, pos: Array, input: Array):
         resolution = (8, 8, 8)

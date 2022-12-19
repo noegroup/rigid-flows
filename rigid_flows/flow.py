@@ -17,13 +17,23 @@ from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.api import C
 from flox._src.flow.impl import Affine
-from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
+from flox.flow import (
+    DoubleMoebius,
+    Pipe,
+    Transform,
+    Transformed,
+    VectorizedTransform,
+)
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .lowrank import LowRankFlow  # type: ignore
 from .nn import Dense, QuatEncoder
-from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
+from .specs import (
+    CouplingSpecification,
+    FlowSpecification,
+    PreprocessingSpecification,
+)
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -394,7 +404,7 @@ class AuxUpdate(eqx.Module):
                 raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                LowRankFlow(u, v, self.low_rank_regularizer),
+                # LowRankFlow(u, v, self.low_rank_regularizer),
                 transform,
             ]
         )
@@ -413,7 +423,7 @@ class AuxUpdate(eqx.Module):
                 raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                LowRankFlow(u, v, self.low_rank_regularizer),
+                # LowRankFlow(u, v, self.low_rank_regularizer),
                 transform,
             ]
         )
@@ -509,7 +519,7 @@ class PosUpdate(eqx.Module):
                 raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                LowRankFlow(u, v, self.low_rank_regularizer),
+                # LowRankFlow(u, v, self.low_rank_regularizer),
                 transform,
             ]
         )
@@ -528,7 +538,7 @@ class PosUpdate(eqx.Module):
                 raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                LowRankFlow(u, v, self.low_rank_regularizer),
+                # LowRankFlow(u, v, self.low_rank_regularizer),
                 transform,
             ]
         )

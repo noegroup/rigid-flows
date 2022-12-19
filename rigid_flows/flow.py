@@ -2,6 +2,7 @@ from cmath import exp
 from dataclasses import asdict, astuple
 from itertools import accumulate
 from math import prod
+from multiprocessing.sharedctypes import Value
 from turtle import forward
 from typing import Any
 
@@ -91,6 +92,56 @@ class RigidTransform(Transform[AtomRepresentation, RigidRepresentation]):
         self, inp: RigidRepresentation
     ) -> Transformed[AtomRepresentation]:
         return from_rigid(inp)
+
+
+@pytree_dataclass(frozen=True)
+class LDU:
+    m: Array
+    apply: str
+
+    def forward(self, input: Array):
+        n = input.shape[0]
+
+        l = jnp.triu(self.m, 1)
+        d = jnp.diag(self.m) * 1e-1
+        u = jnp.tril(self.m, -1)
+
+        m = (l + jnp.eye(n)) @ jnp.diag(jnp.exp(d)) @ (u + jnp.eye(n))
+
+        ldj = d.sum()
+
+        match self.apply:
+            case "left":
+                output = m @ input
+            case "right":
+                output = input @ m
+            case _:
+                raise ValueError(f"unknown application {self.apply}")
+
+        return Transformed(output, ldj)
+
+    def inverse(self, input: Array):
+        n = input.shape[0]
+
+        l = jnp.triu(self.m, 1)
+        d = jnp.diag(self.m) * 1e-1
+        u = jnp.tril(self.m, -1)
+
+        m = (l + jnp.eye(n)) @ jnp.diag(jnp.exp(d)) @ (u + jnp.eye(n))
+        m = jnp.linalg.inv(m)
+
+        # output = (m @ input - self.t) + self.t
+
+        match self.apply:
+            case "left":
+                output = m @ input
+            case "right":
+                output = input @ m
+            case _:
+                raise ValueError(f"unknown application {self.apply}")
+
+        ldj = -d.sum()
+        return Transformed(output, ldj)
 
 
 @pytree_dataclass
@@ -345,6 +396,7 @@ class AuxUpdate(eqx.Module):
     num_low_rank: int
     low_rank_regularizer: float
     transform: str
+    seq_len: int
 
     def __init__(
         self,
@@ -377,11 +429,15 @@ class AuxUpdate(eqx.Module):
         self.transform = transform
         self.net = Dense(
             num_inp=num_dims + num_pos,
-            num_out=(2 + 2 * self.num_low_rank) * auxiliary_shape[-1],
+            # num_out=(2 + 2 * self.num_low_rank) * auxiliary_shape[-1],
+            num_out=auxiliary_shape[-1]
+            + kwargs["seq_len"]
+            + auxiliary_shape[-1] ** 2,
             key=next(chain),
-            reduce_output=(len(self.auxiliary_shape) == 1),
+            reduce_output=False,
             **kwargs,
         )
+        self.seq_len = kwargs["seq_len"]
 
     def params(self, input: State):
         """Compute the parameters for the affine transform
@@ -397,33 +453,29 @@ class AuxUpdate(eqx.Module):
         out = self.net(feats).reshape(-1)
 
         splits = tuple(
-            accumulate([prod(input.aux.shape), prod(input.aux.shape)])
+            accumulate(
+                [prod(self.auxiliary_shape), self.seq_len * self.seq_len]
+            )
         )
-
-        new, mix, uvs = jnp.split(out, splits, axis=-1)  # type: ignore
-
-        new = new.reshape(input.aux.shape)
-        mix = mix.reshape(input.aux.shape)
-        mix = mix * 1e-1
-        u, v = uvs.reshape(2, -1)
-        u = u / jnp.sqrt(prod(u.shape)) * 1e-1
-        v = v / jnp.sqrt(prod(v.shape)) * 1e-1
-        return new, mix, u, v
+        shift, atom_mixer, dim_mixer = jnp.split(out, splits, axis=-1)  # type: ignore
+        atom_mixer = atom_mixer.reshape(self.seq_len, self.seq_len) * 1e-1
+        dim_mixer = (
+            dim_mixer.reshape(
+                self.seq_len, self.auxiliary_shape[-1], self.auxiliary_shape[-1]
+            )
+            * 1e-1
+        )
+        shift = shift.reshape(input.aux.shape) * 1e-1
+        return shift, atom_mixer, dim_mixer
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        new, mix, u, v = self.params(input)
-        match self.transform:
-            case "gated":
-                transform = GatedShift(new, mix, jnp.array(3.0))
-            case "affine":
-                transform = Affine(new, mix)
-            case _:
-                raise ValueError(f"unknown transform {self.transform}")
+        shift, atom_mixer, dim_mixer = self.params(input)
         pipe = Pipe(
             [
-                LowRankFlow(u, v, self.low_rank_regularizer),
-                transform,
+                LDU(atom_mixer, "left"),
+                Affine(shift, jnp.zeros_like(shift)),
+                VectorizedTransform(LDU(dim_mixer, "right")),
             ]
         )
         aux, ldj = unpack(pipe.forward(input.aux))
@@ -431,18 +483,12 @@ class AuxUpdate(eqx.Module):
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        new, mix, u, v = self.params(input)
-        match self.transform:
-            case "gated":
-                transform = GatedShift(new, mix, jnp.array(3.0))
-            case "affine":
-                transform = Affine(new, mix)
-            case _:
-                raise ValueError(f"unknown transform {self.transform}")
+        shift, atom_mixer, dim_mixer = self.params(input)
         pipe = Pipe(
             [
-                LowRankFlow(u, v, self.low_rank_regularizer),
-                transform,
+                LDU(atom_mixer, "left"),
+                Affine(shift, jnp.zeros_like(shift)),
+                VectorizedTransform(LDU(dim_mixer, "right")),
             ]
         )
         aux, ldj = unpack(pipe.inverse(input.aux))
@@ -457,6 +503,7 @@ class PosUpdate(eqx.Module):
     num_low_rank: int
     low_rank_regularizer: float
     transform: str
+    seq_len: int
 
     def __init__(
         self,
@@ -487,10 +534,12 @@ class PosUpdate(eqx.Module):
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.net = Dense(
             num_inp=num_dims + auxiliary_shape[-1],
-            num_out=(2 + 2 * num_low_rank) * num_pos,
+            # num_out=(2 + 2 * num_low_rank) * num_pos,
+            num_out=num_pos + kwargs["seq_len"] + num_pos**2,
             key=next(chain),
             **kwargs,
         )
+        self.seq_len = kwargs["seq_len"]
         self.low_rank_regularizer = low_rank_regularizer
         self.transform = transform
 
@@ -512,33 +561,27 @@ class PosUpdate(eqx.Module):
         out = out.reshape(-1)
 
         splits = tuple(
-            accumulate([prod(input.pos.shape), prod(input.pos.shape)])
+            accumulate([prod(input.pos.shape), self.seq_len * self.seq_len])
         )
-
-        new, mix, uvs = jnp.split(out, splits, axis=-1)  # type: ignore
-
-        new = new.reshape(input.pos.shape)
-        mix = mix.reshape(input.pos.shape)
-        mix = mix * 1e-1
-        u, v = uvs.reshape(2, -1)
-        u = u / jnp.sqrt(prod(u.shape)) * 1e-1
-        v = v / jnp.sqrt(prod(v.shape)) * 1e-1
-        return new, mix, u, v
+        shift, atom_mixer, dim_mixer = jnp.split(out, splits, axis=-1)  # type: ignore
+        atom_mixer = atom_mixer.reshape(self.seq_len, self.seq_len) * 1e-1
+        dim_mixer = (
+            dim_mixer.reshape(
+                self.seq_len, input.pos.shape[-1], input.pos.shape[-1]
+            )
+            * 1e-1
+        )
+        shift = shift.reshape(input.pos.shape) * 1e-1
+        return shift, atom_mixer, dim_mixer
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        new, mix, u, v = self.params(input)
-        match self.transform:
-            case "gated":
-                transform = GatedShift(new, mix, jnp.array(3.0))
-            case "affine":
-                transform = Affine(new, mix)
-            case _:
-                raise ValueError(f"unknown transform {self.transform}")
+        shift, atom_mixer, dim_mixer = self.params(input)
         pipe = Pipe(
             [
-                LowRankFlow(u, v, self.low_rank_regularizer),
-                transform,
+                LDU(atom_mixer, "left"),
+                Affine(shift, jnp.zeros_like(shift)),
+                VectorizedTransform(LDU(dim_mixer, "right")),
             ]
         )
         pos, ldj = unpack(pipe.forward(input.pos))
@@ -546,18 +589,12 @@ class PosUpdate(eqx.Module):
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        new, mix, u, v = self.params(input)
-        match self.transform:
-            case "gated":
-                transform = GatedShift(new, mix, jnp.array(3.0))
-            case "affine":
-                transform = Affine(new, mix)
-            case _:
-                raise ValueError(f"unknown transform {self.transform}")
+        shift, atom_mixer, dim_mixer = self.params(input)
         pipe = Pipe(
             [
-                LowRankFlow(u, v, self.low_rank_regularizer),
-                transform,
+                LDU(atom_mixer, "left"),
+                Affine(shift, jnp.zeros_like(shift)),
+                VectorizedTransform(LDU(dim_mixer, "right")),
             ]
         )
         pos, ldj = unpack(pipe.inverse(input.pos))

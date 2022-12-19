@@ -95,9 +95,13 @@ class SystemSpecification:
     store_forces: bool
     forces_path: str | None
     fixed_box: bool
+    water_type: str = "tip4pew"
 
     def __str__(self) -> str:
-        return f"ice{self.ice_type}_T{self.temperature}_N{self.num_molecules}"
+        string = f"ice{self.ice_type}_T{self.temperature}_N{self.num_molecules}"
+        if self.water_type != "tip4pew":
+            string = f"{self.water_type}_{string}"
+        return string
 
 
 @pytree_dataclass(frozen=True)

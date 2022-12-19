@@ -72,6 +72,7 @@ system:
   num_molecules: 16
   temperature: 250
   ice_type: XI
+  water_type: tip4pew
   recompute_forces: false
   store_forces: false
   forces_path: null

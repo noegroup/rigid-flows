@@ -12,8 +12,8 @@ from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 from jaxtyping import Float
+from lowrank import LowRankFlow  # type: ignore
 
-from experiments.rigid_flows.rigid_flows.lowrank import LowRankFlow  # type: ignore
 from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.api import C

@@ -77,34 +77,38 @@ class OpenMMEnergyModel:
         self,
         cutoff: float | None,
         type: str = "",
-        **kwargs,
+        slope: float | None = None,
     ):
         """
-        cutoff is in units of LJ sigma.
-        available types are 'linear' and 'square', which requires setting 'slope'
+        cutoff: units of LJ sigma, set to None for standard LJ potential
+        type: 'linear' or 'square'
+        slope: used only when type='square'
         """
         my_lennard_jones = partial(
             lennard_jones, sigma=self.model.sigma_O, epsilon=self.model.epsilon_O
         )
-        match type:
-            case "linear":
-                expr = get_approx_expr(
-                    my_lennard_jones,
-                    approx_with_linear,
-                    cutoff=cutoff * self.model.sigma_O,
-                )
-            case "square":
-                if "slope" not in kwargs:
-                    raise ValueError(
-                        "'slope' needed in kwargs when using square approximation."
+        if cutoff is None:
+            expr = parse_jaxpr(my_lennard_jones)[0]
+        else:
+            match type:
+                case "linear":
+                    expr = get_approx_expr(
+                        my_lennard_jones,
+                        approx_with_linear,
+                        cutoff=cutoff * self.model.sigma_O,
                     )
-                expr = get_approx_expr(
-                    my_lennard_jones,
-                    partial(approx_with_square, slope=kwargs["slope"]),
-                    cutoff=cutoff * self.model.sigma_O,
-                )
-            case _:
-                expr = parse_jaxpr(my_lennard_jones)[0]
+                case "square":
+                    if slope is None:
+                        raise ValueError(
+                            "must set slope when using square approximation"
+                        )
+                    expr = get_approx_expr(
+                        my_lennard_jones,
+                        partial(approx_with_square, slope=slope),
+                        cutoff=cutoff * self.model.sigma_O,
+                    )
+                case _:
+                    raise ValueError(f"unkown cutoff type: '{type}'")
         self.model.set_customLJ(expr, self.context)
 
     def set_box(self, box: SimulationBox):
@@ -178,10 +182,10 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
             box = jnp.diag(box)
 
         if not has_batch_dim:
-            assert pos.shape == (model.model.n_waters, 4, 3)
+            assert pos.shape == (model.model.n_waters, model.model.n_sites, 3)
             pos = jnp.expand_dims(pos, axis=0)
         else:
-            assert pos.shape[1:] == (model.model.n_waters, 4, 3)
+            assert pos.shape[1:] == (model.model.n_waters, model.model.n_sites, 3)
 
         pos_flat = pos.reshape(pos.shape[0], -1, 3)
 

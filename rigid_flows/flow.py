@@ -403,8 +403,8 @@ class AuxUpdate(eqx.Module):
         mix = mix.reshape(input.aux.shape)
         mix = mix * 1e-1
         u, v = uvs.reshape(2, -1)
-        u = u / jnp.sqrt(prod(u.shape)) * 1e-1
-        v = v / jnp.sqrt(prod(v.shape)) * 1e-1
+        u = u / jnp.sqrt(prod(u.shape))
+        v = v / jnp.sqrt(prod(v.shape))
         return new, mix, u, v
 
     def forward(self, input: State) -> Transformed[State]:
@@ -518,8 +518,8 @@ class PosUpdate(eqx.Module):
         mix = mix.reshape(input.pos.shape)
         mix = mix * 1e-1
         u, v = uvs.reshape(2, -1)
-        u = u / jnp.sqrt(prod(u.shape)) * 1e-1
-        v = v / jnp.sqrt(prod(v.shape)) * 1e-1
+        u = u / jnp.sqrt(prod(u.shape))
+        v = v / jnp.sqrt(prod(v.shape))
         return new, mix, u, v
 
     def forward(self, input: State) -> Transformed[State]:
@@ -534,7 +534,7 @@ class PosUpdate(eqx.Module):
                 raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                # LowRankFlow(u, v, self.low_rank_regularizer),
+                LowRankFlow(u, v, self.low_rank_regularizer),
                 transform,
             ]
         )
@@ -553,7 +553,7 @@ class PosUpdate(eqx.Module):
                 raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                # LowRankFlow(u, v, self.low_rank_regularizer),
+                LowRankFlow(u, v, self.low_rank_regularizer),
                 transform,
             ]
         )
@@ -612,7 +612,7 @@ class PositionEncoder(eqx.Module):
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
         feats = jnp.concatenate([aux], axis=-1)
-        out = self.net(feats) * 1e-1
+        out = self.net(feats)
         center = out.reshape(input.pos.shape)
         return center
 

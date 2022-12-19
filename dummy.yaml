@@ -35,7 +35,7 @@ model:
         num_pos: 3
         num_dims: 64
         num_hidden: 64
-        num_blocks: 2
+        num_blocks: 1
         num_low_rank: 10
         low_rank_regularizer: 0.
         transform: gated
@@ -45,11 +45,11 @@ model:
         num_dims: 64
         num_pos: 3
         num_hidden: 64
-        num_blocks: 2
+        num_blocks: 1
 
     # coupling layers
     couplings:
-      - num_repetitions: 2
+      - num_repetitions: 1
         auxiliary_update:
           seq_len: 16
           activation: silu
@@ -66,7 +66,7 @@ model:
           num_pos: 3
           num_dims: 64
           num_hidden: 64
-          num_blocks: 2
+          num_blocks: 1
           num_low_rank: 10
           low_rank_regularizer: 0.
           transform: gated
@@ -74,7 +74,7 @@ model:
           seq_len: 16
           activation: silu
           num_hidden: 64
-          num_blocks: 2
+          num_blocks: 1
         act_norm: true
 
   # base density

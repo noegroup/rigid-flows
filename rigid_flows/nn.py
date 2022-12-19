@@ -1,12 +1,11 @@
-from cmath import sqrt
+from itertools import accumulate
+from math import sqrt
 
 import equinox as eqx
 import jax
 from jax import numpy as jnp
 from jaxtyping import Array, Float
-from numpy import reshape  # type: ignore
 
-from flox._src.nn.modules import dense
 from flox.util import key_chain
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -53,11 +52,10 @@ ACTIVATION_FUNCTIONS = {
 
 class Transformer(eqx.Module):
 
-    keys: eqx.nn.Linear
-    queries: eqx.nn.Linear
-    values: eqx.nn.Linear
+    params: eqx.nn.Linear
     norm: eqx.nn.LayerNorm
     num_heads: int
+    splits: tuple[int]
 
     def __init__(
         self,
@@ -74,29 +72,38 @@ class Transformer(eqx.Module):
         chain = key_chain(key)
         self.num_heads = 8
         num_hidden = 64
-        self.keys = eqx.nn.Linear(
-            num_inp, (self.num_heads * num_hidden), key=next(chain)
+        self.params = eqx.nn.Linear(
+            num_inp,
+            (self.num_heads * (2 * num_hidden + num_out)),
+            key=next(chain),
         )
-        self.queries = eqx.nn.Linear(
-            num_inp, (self.num_heads * num_hidden), key=next(chain)
-        )
-        self.values = eqx.nn.Linear(
-            num_inp, (self.num_heads * num_out), key=next(chain)
-        )
+        # self.queries = eqx.nn.Linear(
+        #     num_inp, (self.num_heads * num_hidden), key=next(chain)
+        # )
+        # self.values = eqx.nn.Linear(
+        #     num_inp, (self.num_heads * num_out), key=next(chain)
+        # )
         self.norm = eqx.nn.LayerNorm(num_out, elementwise_affine=True)
+
+        self.splits = tuple(accumulate([num_hidden, num_hidden]))
 
     def __call__(self, input, *args, **kwargs):
 
-        keys = jax.vmap(self.keys)(input).reshape(
+        out = jax.vmap(self.params)(input).reshape(
             input.shape[0], self.num_heads, -1
         )
+        keys, queries, values = jnp.split(out, self.splits, axis=-1)  # type: ignore
         keys = keys / sqrt(keys.shape[-1])
-        queries = jax.vmap(self.queries)(input).reshape(
-            input.shape[0], self.num_heads, -1
-        )
-        values = jax.vmap(self.values)(input).reshape(
-            input.shape[0], self.num_heads, -1
-        )
+        # keys = jax.vmap(self.keys)(input).reshape(
+        #     input.shape[0], self.num_heads, -1
+        # )
+        # keys = keys / sqrt(keys.shape[-1])
+        # queries = jax.vmap(self.queries)(input).reshape(
+        #     input.shape[0], self.num_heads, -1
+        # )
+        # values = jax.vmap(self.values)(input).reshape(
+        #     input.shape[0], self.num_heads, -1
+        # )
         logits = jnp.einsum("ihk, jhk -> ijh", keys, queries)
         attention = jax.nn.softmax(logits, axis=1)
         output = jnp.einsum("ijh, jhe -> ie", attention, values)
@@ -174,10 +181,13 @@ class Dense(eqx.Module):
     def __call__(
         self, input: Float[Array, "... seq_len node_dim"]
     ) -> Float[Array, "... seq_len node_dim"]:
+
         input = jax.vmap(self.encoder)(input)
+        # input = self.encoder(input.reshape(-1))
         for res in self.inner:
             input = input + res(input)
         output = jax.vmap(self.decoder)(input)
+        # output = self.decoder(input).reshape(input.shape[0], -1)
         # if self.reduce_output:
         #     output = output.sum(axis=0)
         # else:

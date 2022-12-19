@@ -84,7 +84,6 @@ class Dense(eqx.Module):
             [
                 eqx.nn.Linear(seq_len * num_inp, num_hidden, key=next(chain)),
                 eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
-                eqx.nn.Lambda(ACTIVATION_FUNCTIONS[activation]),
             ]
         )
         if activation not in ACTIVATION_FUNCTIONS:

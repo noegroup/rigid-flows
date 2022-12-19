@@ -21,7 +21,7 @@ def invert_and_ldj_stable(u, v, U_inv, V_inv, regularizer: float):
     u_inv = low_rank_matmul(U_inv, V_inv, u, residual=True)
 
     # guarantee invertibility
-    v = v * jax.nn.softplus(u_inv @ v + jnp.sqrt(2) - regularizer)
+    v = v * jax.nn.softplus(u_inv @ v)
 
     ldj = jnp.log1p(u_inv @ v)
     v_inv = low_rank_matmul(V_inv, U_inv, v, residual=True)

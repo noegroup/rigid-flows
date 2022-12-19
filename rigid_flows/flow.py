@@ -18,13 +18,23 @@ from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.api import C
 from flox._src.flow.impl import Affine
-from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
+from flox.flow import (
+    DoubleMoebius,
+    Pipe,
+    Transform,
+    Transformed,
+    VectorizedTransform,
+)
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .lowrank import LowRankFlow  # type: ignore
 from .nn import Dense, QuatEncoder
-from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
+from .specs import (
+    CouplingSpecification,
+    FlowSpecification,
+    PreprocessingSpecification,
+)
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -396,8 +406,8 @@ class AuxUpdate(eqx.Module):
         mix = mix.reshape(input.aux.shape)
         mix = mix * 1e-1
         u, v = uvs.reshape(2, -1)
-        u = u / jnp.sqrt(prod(u.shape))
-        v = v / jnp.sqrt(prod(v.shape))
+        u = u / jnp.sqrt(prod(u.shape)) * 1e-1
+        v = v / jnp.sqrt(prod(v.shape)) * 1e-1
         return new, mix, u, v
 
     def forward(self, input: State) -> Transformed[State]:
@@ -511,8 +521,8 @@ class PosUpdate(eqx.Module):
         mix = mix.reshape(input.pos.shape)
         mix = mix * 1e-1
         u, v = uvs.reshape(2, -1)
-        u = u / jnp.sqrt(prod(u.shape))
-        v = v / jnp.sqrt(prod(v.shape))
+        u = u / jnp.sqrt(prod(u.shape)) * 1e-1
+        v = v / jnp.sqrt(prod(v.shape)) * 1e-1
         return new, mix, u, v
 
     def forward(self, input: State) -> Transformed[State]:
@@ -520,7 +530,7 @@ class PosUpdate(eqx.Module):
         new, mix, u, v = self.params(input)
         match self.transform:
             case "gated":
-                transform = GatedShift(new, mix, jnp.array(3.))
+                transform = GatedShift(new, mix, jnp.array(3.0))
             case "affine":
                 transform = Affine(new, mix)
             case _:
@@ -539,7 +549,7 @@ class PosUpdate(eqx.Module):
         new, mix, u, v = self.params(input)
         match self.transform:
             case "gated":
-                transform = GatedShift(new, mix, jnp.array(3.))
+                transform = GatedShift(new, mix, jnp.array(3.0))
             case "affine":
                 transform = Affine(new, mix)
             case _:

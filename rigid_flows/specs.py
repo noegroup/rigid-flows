@@ -19,6 +19,14 @@ class ReportingSpecifications:
 
 
 @pytree_dataclass(frozen=True)
+class PosEncoderSpecification:
+    seq_len: int
+    activation: str
+    num_hidden: int
+    num_blocks: int
+
+
+@pytree_dataclass(frozen=True)
 class PosAndAuxUpdateSpecification:
     seq_len: int
     activation: str
@@ -38,7 +46,8 @@ class QuatUpdateSpecification:
 @pytree_dataclass(frozen=True)
 class PreprocessingSpecification:
     auxiliary_update: PosAndAuxUpdateSpecification
-    displacement_encoder: PosAndAuxUpdateSpecification
+    position_encoder: PosEncoderSpecification
+    act_norm: bool
 
 
 @pytree_dataclass(frozen=True)

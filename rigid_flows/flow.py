@@ -22,7 +22,7 @@ from flox.flow import (
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
-from .nn import Dense, QuatEncoder
+from .nn import MLPMixer, QuatEncoder
 from .specs import (
     CouplingSpecification,
     FlowSpecification,
@@ -299,7 +299,7 @@ class GatedShift:
 class QuatUpdate(eqx.Module):
     """Flow layer updating the quaternion part of a state"""
 
-    net: Dense
+    net: MLPMixer
 
     def __init__(
         self,
@@ -321,7 +321,7 @@ class QuatUpdate(eqx.Module):
             num_blocks (int, optional): number of transformer blocks. Defaults to 1.
             key (KeyArray): PRNGKey for param initialization
         """
-        self.net = Dense(
+        self.net = MLPMixer(
             num_inp=auxiliary_shape[-1] + num_pos,
             num_out=4 * 4 + 4,  # num_rot,
             key=key,
@@ -385,7 +385,7 @@ class AuxUpdate(eqx.Module):
     """Flow layer updating the auxiliary part of a state"""
 
     symmetrizer: QuatEncoder
-    net: Dense  # | eqx.nn.Sequential | Conv
+    net: MLPMixer  # | eqx.nn.Sequential | Conv
     auxiliary_shape: tuple[int, ...]
     num_low_rank: int
     low_rank_regularizer: float
@@ -421,7 +421,7 @@ class AuxUpdate(eqx.Module):
         self.num_low_rank = num_low_rank
         self.low_rank_regularizer = low_rank_regularizer
         self.transform = transform
-        self.net = Dense(
+        self.net = MLPMixer(
             num_inp=num_dims + num_pos,
             num_out=2 * auxiliary_shape[-1],
             key=next(chain),
@@ -474,7 +474,7 @@ class PosUpdate(eqx.Module):
     """Flow layer updating the position part of a state"""
 
     symmetrizer: QuatEncoder
-    net: Dense
+    net: MLPMixer
     # net: Conv
     num_low_rank: int
     low_rank_regularizer: float
@@ -508,7 +508,7 @@ class PosUpdate(eqx.Module):
         self.num_low_rank = num_low_rank
         chain = key_chain(key)
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
-        self.net = Dense(
+        self.net = MLPMixer(
             num_inp=num_dims + auxiliary_shape[-1],
             # num_out=(2 + 2 * num_low_rank) * num_pos,
             num_out=2 * num_pos,
@@ -569,7 +569,7 @@ class PositionEncoder(eqx.Module):
     which are predicted from auxiliaries
     """
 
-    net: Dense
+    net: MLPMixer
     # net: Conv
 
     def __init__(
@@ -595,7 +595,7 @@ class PositionEncoder(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         chain = key_chain(key)
-        self.net = Dense(
+        self.net = MLPMixer(
             num_inp=auxiliary_shape[-1],
             num_out=num_pos,
             key=next(chain),

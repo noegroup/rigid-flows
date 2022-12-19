@@ -71,7 +71,6 @@ class Transformer(eqx.Module):
     ):
         chain = key_chain(key)
         self.num_heads = 8
-        num_hidden = 64
         self.params = eqx.nn.Linear(
             num_inp,
             (self.num_heads * (2 * num_hidden + num_out)),
@@ -108,6 +107,114 @@ class Transformer(eqx.Module):
         attention = jax.nn.softmax(logits, axis=1)
         output = jnp.einsum("ijh, jhe -> ie", attention, values)
         return jax.vmap(self.norm)(output)
+
+
+
+
+class LayerStacked(eqx.Module):
+
+    layers: eqx.Module
+
+    def __init__(self, layers: list[eqx.Module]):
+        self.layers = jax.tree_map(jnp.stack, layers, is_leaf=eqx.is_array)
+
+    def __call__(self, x):
+
+        params, static = eqx.partition(self.layers, eqx.is_array)
+
+        def body(x, param):
+            fn = eqx.combine(param, static)
+            y = fn(x)
+            return y, None
+
+        y, _ = jax.lax.scan(body, x, params)
+        return y
+
+
+
+class MLPMixerLayer(eqx.Module):
+
+    token_mixer: eqx.nn.Sequential
+    dim_mixer: eqx.nn.Sequential
+    token_norm: eqx.nn.LayerNorm
+    dim_norm: eqx.nn.LayerNorm
+
+    def __init__(
+        self,
+        seq_len: int,
+        num_inp: int,
+        expansion_factor: float,
+        *,
+        key,
+    ) -> None:
+        chain = key_chain(key)
+        num_hidden = int(num_inp * expansion_factor)
+        self.dim_mixer = eqx.nn.Sequential(
+            [
+                eqx.nn.Linear(num_inp, num_hidden, key=next(chain)),
+                eqx.nn.Lambda(jax.nn.gelu),
+                eqx.nn.Linear(num_hidden, num_inp, key=next(chain)),
+            ]
+        )
+        self.dim_norm = eqx.nn.LayerNorm(num_inp, elementwise_affine=True)
+
+        self.token_mixer = eqx.nn.Sequential(
+            [
+                eqx.nn.Linear(seq_len, num_hidden, key=next(chain)),
+                eqx.nn.Lambda(jax.nn.gelu),
+                eqx.nn.Linear(num_hidden, seq_len, key=next(chain)),
+            ]
+        )
+
+        self.token_norm = eqx.nn.LayerNorm(num_inp, elementwise_affine=True)
+
+    def __call__(self, input):
+        input = input + jax.vmap(self.dim_mixer, in_axes=0)(
+            jax.vmap(self.dim_norm)(input)
+        )
+
+        input = input + jax.vmap(self.token_mixer, in_axes=1, out_axes=1)(
+            jax.vmap(self.token_norm)(input)
+        )
+
+        return input
+
+
+class MLPMixer(eqx.Module):
+
+    encoder: eqx.nn.Linear
+    decoder: eqx.nn.Linear
+    mixers: LayerStacked#list[MLPMixerLayer]
+    norm: eqx.nn.LayerNorm
+
+    def __init__(
+        self,
+        seq_len: int,
+        num_inp: int,
+        num_out: int,
+        num_hidden: int,
+        activation: str,
+        num_blocks: int = 0,
+        reduce_output: bool = False,
+        *,
+        key: KeyArray,
+    ):
+        chain = key_chain(key)
+        self.encoder = eqx.nn.Linear(num_inp, num_hidden, key=next(chain))
+        self.mixers = LayerStacked([
+            MLPMixerLayer(seq_len, num_hidden, 2, key=next(chain))
+            for _ in range(num_blocks)
+        ])
+
+        self.decoder = eqx.nn.Linear(num_hidden, num_out, key=next(chain))
+        self.norm = eqx.nn.LayerNorm(num_hidden, elementwise_affine=True)
+
+    def __call__(self, input):
+        hidden = jax.vmap(self.encoder)(input)
+        hidden =self.mixers(hidden)
+        hidden = self.norm(hidden)
+        out = jax.vmap(self.decoder)(hidden)
+        return out
 
 
 class Dense(eqx.Module):

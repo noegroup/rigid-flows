@@ -18,23 +18,13 @@ from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.api import C
 from flox._src.flow.impl import Affine
-from flox.flow import (
-    DoubleMoebius,
-    Pipe,
-    Transform,
-    Transformed,
-    VectorizedTransform,
-)
+from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .lowrank import LowRankFlow  # type: ignore
 from .nn import Dense, QuatEncoder
-from .specs import (
-    CouplingSpecification,
-    FlowSpecification,
-    PreprocessingSpecification,
-)
+from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -235,17 +225,20 @@ def initialize_actnorm(flow: Pipe, batch: Any):
 class GatedShift:
     new: Array
     mix: Array
+    initial_bias: Array
 
     def forward(self, input: Array):
-        mix = jax.nn.sigmoid(self.mix)
+        mix = jax.nn.sigmoid(self.mix + self.initial_bias)
         ldj = jax.nn.log_sigmoid(self.mix).sum()
-        output = input * mix + self.new * (1.0 - mix)
+        new = self.new * (1.0 - mix)
+        output = input * mix + new
         return Transformed(output, ldj)
 
     def inverse(self, input: Array):
-        mix = jax.nn.sigmoid(self.mix)
+        mix = jax.nn.sigmoid(self.mix + self.initial_bias)
         ldj = -jax.nn.log_sigmoid(self.mix).sum()
-        output = (input - self.new * (1.0 - mix)) / self.mix
+        new = self.new * (1.0 - mix)
+        output = (input - new) / mix
         return Transformed(output, ldj)
 
 
@@ -412,7 +405,7 @@ class AuxUpdate(eqx.Module):
         new, mix, u, v = self.params(input)
         match self.transform:
             case "gated":
-                transform = GatedShift(new, mix)
+                transform = GatedShift(new, mix, jnp.array(3.0))
             case "affine":
                 transform = Affine(new, mix)
             case _:
@@ -431,7 +424,7 @@ class AuxUpdate(eqx.Module):
         new, mix, u, v = self.params(input)
         match self.transform:
             case "gated":
-                transform = GatedShift(new, mix)
+                transform = GatedShift(new, mix, jnp.array(3.0))
             case "affine":
                 transform = Affine(new, mix)
             case _:
@@ -527,7 +520,7 @@ class PosUpdate(eqx.Module):
         new, mix, u, v = self.params(input)
         match self.transform:
             case "gated":
-                transform = GatedShift(new, mix)
+                transform = GatedShift(new, mix, jnp.array(3.))
             case "affine":
                 transform = Affine(new, mix)
             case _:
@@ -546,7 +539,7 @@ class PosUpdate(eqx.Module):
         new, mix, u, v = self.params(input)
         match self.transform:
             case "gated":
-                transform = GatedShift(new, mix)
+                transform = GatedShift(new, mix, jnp.array(3.))
             case "affine":
                 transform = Affine(new, mix)
             case _:

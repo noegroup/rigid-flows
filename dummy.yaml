@@ -31,7 +31,7 @@ model:
       act_norm: true
       auxiliary_update:
         seq_len: 16
-        activation: gelu
+        activation: silu
         num_pos: 3
         num_dims: 64
         num_hidden: 256
@@ -41,7 +41,7 @@ model:
         transform: gated
       position_encoder:
         seq_len: 16
-        activation: gelu
+        activation: silu
         num_dims: 64
         num_pos: 3
         num_hidden: 256
@@ -52,7 +52,7 @@ model:
       - num_repetitions: 1
         auxiliary_update:
           seq_len: 16
-          activation: gelu
+          activation: silu
           num_pos: 3
           num_dims: 64
           num_hidden: 256
@@ -62,7 +62,7 @@ model:
           transform: gated
         position_update:
           seq_len: 16
-          activation: gelu
+          activation: silu
           num_pos: 3
           num_dims: 64
           num_hidden: 256
@@ -72,7 +72,7 @@ model:
           transform: gated
         quaternion_update:
           seq_len: 16
-          activation: gelu
+          activation: silu
           num_hidden: 256
           num_blocks: 1
         act_norm: true

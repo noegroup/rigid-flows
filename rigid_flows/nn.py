@@ -51,14 +51,13 @@ ACTIVATION_FUNCTIONS = {
 }
 
 
-from flox._src import bulk
+class Transformer(eqx.Module):
 
-
-class Conv(eqx.Module):
-
-    encoder_kernel: Array
-    inner_kernel: Array
-    decoder_kernel: Array
+    keys: eqx.nn.Linear
+    queries: eqx.nn.Linear
+    values: eqx.nn.Linear
+    norm: eqx.nn.LayerNorm
+    num_heads: int
 
     def __init__(
         self,
@@ -73,42 +72,35 @@ class Conv(eqx.Module):
         key: KeyArray,
     ):
         chain = key_chain(key)
-
-        num_inner = 1
-        window_size = 3
-        self.encoder_kernel = jax.random.normal(
-            next(chain), shape=(window_size,) * 3 + (32, num_inp)
-        ) / sqrt(27 * 32 * num_inp)
-        self.inner_kernel = jax.random.normal(
-            next(chain), shape=(num_inner,) + (window_size,) * 3 + (32, 32)
-        ) / sqrt(27 * 2 * 32)
-        self.decoder_kernel = jax.random.normal(
-            next(chain), shape=(window_size,) * 3 + (num_out, 32)
-        ) / sqrt(27 * 32 * 32)
-
-    def __call__(self, pos: Array, input: Array):
-        resolution = (8, 8, 8)
-        # raise ValueError(input.shape)
-        # raise ValueError(pos.shape, input.shape)
-        idxs = jax.vmap(bulk.lattice_indices, in_axes=(0, None, None))(
-            pos, bulk.neighbors(pos.shape[-1]), resolution
+        self.num_heads = 8
+        num_hidden = 64
+        self.keys = eqx.nn.Linear(
+            num_inp, (self.num_heads * num_hidden), key=next(chain)
         )
-        weights = jax.vmap(bulk.lattice_weights, in_axes=(0, 0, None))(
-            pos, idxs, resolution
+        self.queries = eqx.nn.Linear(
+            num_inp, (self.num_heads * num_hidden), key=next(chain)
         )
-        img = bulk.scatter(input, weights, idxs, resolution)
-        out = bulk.conv_nd(img, self.encoder_kernel)
-        for kernel in self.inner_kernel:
-            res = out
-            out = bulk.conv_nd(out, kernel)
-            out = res + jax.nn.silu(out)
-        out = bulk.conv_nd(out, self.decoder_kernel)
+        self.values = eqx.nn.Linear(
+            num_inp, (self.num_heads * num_out), key=next(chain)
+        )
+        self.norm = eqx.nn.LayerNorm(num_out, elementwise_affine=True)
 
-        out = bulk.gather(out, idxs, bulk.lattice.AggregationMethod.Nothing)
-        out = out.sum(axis=1)
+    def __call__(self, input, *args, **kwargs):
 
-        out = out.reshape(input.shape[0], -1)
-        return out
+        keys = jax.vmap(self.keys)(input).reshape(
+            input.shape[0], self.num_heads, -1
+        )
+        keys = keys / sqrt(keys.shape[-1])
+        queries = jax.vmap(self.queries)(input).reshape(
+            input.shape[0], self.num_heads, -1
+        )
+        values = jax.vmap(self.values)(input).reshape(
+            input.shape[0], self.num_heads, -1
+        )
+        logits = jnp.einsum("ihk, jhk -> ijh", keys, queries)
+        attention = jax.nn.softmax(logits, axis=1)
+        output = jnp.einsum("ijh, jhe -> ie", attention, values)
+        return jax.vmap(self.norm)(output)
 
 
 class Dense(eqx.Module):
@@ -144,7 +136,8 @@ class Dense(eqx.Module):
         self.seq_len = seq_len
         self.encoder = eqx.nn.Sequential(
             [
-                eqx.nn.Linear(seq_len * num_inp, num_hidden, key=next(chain)),
+                # eqx.nn.Linear(seq_len * num_inp, num_hidden, key=next(chain)),
+                eqx.nn.Linear(num_inp, num_hidden, key=next(chain)),
                 eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
             ]
         )
@@ -154,9 +147,18 @@ class Dense(eqx.Module):
         self.inner = tuple(
             eqx.nn.Sequential(
                 [
-                    eqx.nn.Linear(num_hidden, num_hidden, key=next(chain)),
-                    eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
-                    eqx.nn.Lambda(ACTIVATION_FUNCTIONS[activation]),
+                    Transformer(
+                        seq_len,
+                        num_hidden,
+                        num_hidden,
+                        0,
+                        "",
+                        0,
+                        key=next(chain),
+                    )
+                    # eqx.nn.Linear(num_hidden, num_hidden, key=next(chain)),
+                    # eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
+                    # eqx.nn.Lambda(ACTIVATION_FUNCTIONS[activation]),
                 ]
             )
             for _ in range(num_blocks)
@@ -164,7 +166,7 @@ class Dense(eqx.Module):
         self.decoder = eqx.nn.Sequential(
             [
                 eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
-                eqx.nn.Linear(num_hidden, seq_len * num_out, key=next(chain)),
+                eqx.nn.Linear(num_hidden, num_out, key=next(chain)),
             ]
         )
         self.reduce_output = reduce_output
@@ -172,12 +174,12 @@ class Dense(eqx.Module):
     def __call__(
         self, input: Float[Array, "... seq_len node_dim"]
     ) -> Float[Array, "... seq_len node_dim"]:
-        input = self.encoder(input.reshape(-1))
+        input = jax.vmap(self.encoder)(input)
         for res in self.inner:
             input = input + res(input)
-        output = self.decoder(input)
-        if self.reduce_output:
-            output = output.sum(axis=0)
-        else:
-            output = output.reshape(self.seq_len, -1)
+        output = jax.vmap(self.decoder)(input)
+        # if self.reduce_output:
+        #     output = output.sum(axis=0)
+        # else:
+        #     output = output.reshape(self.seq_len, -1)
         return output

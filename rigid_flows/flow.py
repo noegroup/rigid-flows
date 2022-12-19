@@ -1,15 +1,9 @@
-from cmath import exp
 from dataclasses import asdict, astuple
-from itertools import accumulate
-from math import prod
-from multiprocessing.sharedctypes import Value
-from turtle import forward
 from typing import Any
 
 import equinox as eqx
 import jax
 import lenses
-import numpy as np
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
@@ -17,25 +11,13 @@ from jaxtyping import Float
 
 from flox import geom
 from flox._src.flow import rigid
-from flox._src.flow.api import C
 from flox._src.flow.impl import Affine
-from flox.flow import (
-    DoubleMoebius,
-    Pipe,
-    Transform,
-    Transformed,
-    VectorizedTransform,
-)
+from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
-from .lowrank import LowRankFlow  # type: ignore
-from .nn import Conv, Dense, QuatEncoder
-from .specs import (
-    CouplingSpecification,
-    FlowSpecification,
-    PreprocessingSpecification,
-)
+from .nn import Dense, QuatEncoder
+from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -260,7 +242,7 @@ class ActNorm(eqx.Module):
     def initialize(self, batch: State):
         val = self.lens.get()(batch)
         std = jnp.std(val, axis=0)
-        log_std = jnp.log(jnp.exp(std) - 1)
+        log_std = jnp.log(jnp.exp(std) - 1 + 1e-6)
         return ActNorm(
             self.lens,
             jnp.mean(val, axis=0),
@@ -392,7 +374,7 @@ class AuxUpdate(eqx.Module):
     """Flow layer updating the auxiliary part of a state"""
 
     symmetrizer: QuatEncoder
-    net: Conv  # Dense | eqx.nn.Sequential | Conv
+    net: Dense  # | eqx.nn.Sequential | Conv
     auxiliary_shape: tuple[int, ...]
     num_low_rank: int
     low_rank_regularizer: float
@@ -428,7 +410,7 @@ class AuxUpdate(eqx.Module):
         self.num_low_rank = num_low_rank
         self.low_rank_regularizer = low_rank_regularizer
         self.transform = transform
-        self.net = Conv(
+        self.net = Dense(
             num_inp=num_dims + num_pos,
             num_out=2 * auxiliary_shape[-1],
             key=next(chain),
@@ -448,7 +430,7 @@ class AuxUpdate(eqx.Module):
         """
         pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(pos, feats).reshape(input.aux.shape[0], -1)
+        out = self.net(feats).reshape(input.aux.shape[0], -1)
 
         shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
         scale = scale.reshape(input.aux.shape) * 1e-1
@@ -481,8 +463,8 @@ class PosUpdate(eqx.Module):
     """Flow layer updating the position part of a state"""
 
     symmetrizer: QuatEncoder
-    # net: Dense
-    net: Conv
+    net: Dense
+    # net: Conv
     num_low_rank: int
     low_rank_regularizer: float
     transform: str
@@ -515,7 +497,7 @@ class PosUpdate(eqx.Module):
         self.num_low_rank = num_low_rank
         chain = key_chain(key)
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
-        self.net = Conv(
+        self.net = Dense(
             num_inp=num_dims + auxiliary_shape[-1],
             # num_out=(2 + 2 * num_low_rank) * num_pos,
             num_out=2 * num_pos,
@@ -540,11 +522,11 @@ class PosUpdate(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
 
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(input.pos, feats).reshape(input.pos.shape[0], -1)
+        out = self.net(feats).reshape(input.pos.shape[0], -1)
 
         shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
         shift = shift.reshape(input.pos.shape)
-        scale = shift.reshape(input.pos.shape) * 1e-1
+        scale = scale.reshape(input.pos.shape) * 1e-1
         return shift, scale
 
     def forward(self, input: State) -> Transformed[State]:
@@ -576,8 +558,8 @@ class PositionEncoder(eqx.Module):
     which are predicted from auxiliaries
     """
 
-    # net: Dense
-    net: Conv
+    net: Dense
+    # net: Conv
 
     def __init__(
         self,
@@ -602,7 +584,7 @@ class PositionEncoder(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         chain = key_chain(key)
-        self.net = Conv(
+        self.net = Dense(
             num_inp=auxiliary_shape[-1],
             num_out=num_pos,
             key=next(chain),
@@ -622,7 +604,7 @@ class PositionEncoder(eqx.Module):
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
         feats = jnp.concatenate([aux], axis=-1)
-        out = self.net(input.aux, feats)
+        out = self.net(feats)
         center = out.reshape(input.pos.shape)
         return center
 

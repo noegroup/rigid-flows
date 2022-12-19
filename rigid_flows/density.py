@@ -101,6 +101,10 @@ class BaseDensity(DensityModel[State]):
             rot_modes, rot_concentration
         )
         self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        # self.pos_model = prior
+        # self.pos_model = tfp.distributions.VonMisesFisher(
+        #     pos_modes, pos_concentration
+        # )
         com_means = jnp.zeros((3,))
         com_stds = jnp.ones((3,))
         self.com_model = tfp.distributions.Normal(com_means, com_stds)
@@ -234,10 +238,6 @@ class TargetDensity(DensityModel[AugmentedData]):
         self.data = data
         self.cutoff = cutoff_threshold
         self.prior = prior
-
-        # set simulation box
-        if self.sys_specs.fixed_box:
-            self.model.set_box(self.box)
 
     @property
     def box(self) -> SimulationBox:

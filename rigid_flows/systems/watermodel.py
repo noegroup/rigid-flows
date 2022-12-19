@@ -19,47 +19,6 @@ except:
     nv = None
 
 
-def setup_simulation(
-    model,
-    temperature,
-    frictionCoeff=1 / unit.picosecond,
-    stepSize=1 * unit.femtosecond,
-    minimizeEnergy=False,
-):
-    integrator = openmm.LangevinMiddleIntegrator(
-        temperature, frictionCoeff, stepSize
-    )
-    for force in model.system.getForces():
-        if isinstance(
-            force,
-            (
-                openmm.MonteCarloBarostat,
-                openmm.MonteCarloAnisotropicBarostat,
-                openmm.MonteCarloFlexibleBarostat,
-            ),
-        ):
-            force.setDefaultTemperature(temperature)
-    simulation = openmm.app.Simulation(model.topology, model.system, integrator)
-    simulation.context.setPositions(model.positions)
-
-    if minimizeEnergy:
-        print(
-            "old energy:",
-            simulation.context.getState(getEnergy=True)
-            .getPotentialEnergy()
-            .value_in_unit(unit.kilojoule_per_mole),
-        )
-        simulation.minimizeEnergy()  # volume is not changed
-        print(
-            "new energy:",
-            simulation.context.getState(getEnergy=True)
-            .getPotentialEnergy()
-            .value_in_unit(unit.kilojoule_per_mole),
-        )
-
-    return simulation
-
-
 class WaterModel:
     def __init__(
         self,
@@ -70,7 +29,7 @@ class WaterModel:
         barostat=None,
         external_field=None,
     ):
-        if water_type not in ["tip3p", "tip4pew", "tip5p", "spce"]:
+        if water_type not in ["tip3p", "tip4pew", "tip5p", "spce", "tip4pew-customLJ"]:
             print(
                 f"+++ WARNING: Unknown water_type `{water_type}` +++",
                 file=stderr,
@@ -91,7 +50,6 @@ class WaterModel:
         topology = mdtraj_topology.to_openmm()
         topology.setPeriodicBoxVectors(box)
 
-        n_atoms = topology.getNumAtoms()
         if nonbondedCutoff > np.diagonal(box).min() / 2:
             nonbondedCutoff = np.diagonal(box).min() / 2
             print(
@@ -99,11 +57,7 @@ class WaterModel:
                 file=stderr,
             )
 
-        ff = openmm.app.ForceField(water_type + ".xml")
-
-        # ff = openmm.app.ForceField(
-        #     "/home/jonas/dev/PhD/so3/experiments/rigid_flows/rigid_flows/systems/test.xml"
-        # )
+        ff = openmm.app.ForceField(water_type.removesuffix("-customLJ") + ".xml")
         system = ff.createSystem(
             topology,
             nonbondedMethod=openmm.app.PME,
@@ -111,31 +65,48 @@ class WaterModel:
             rigidWater=True,
             removeCMMotion=True,
         )
-
-        forces = {
-            force.__class__.__name__: force for force in system.getForces()
-        }
+        forces = {f.__class__.__name__: f for f in system.getForces()}
         forces["NonbondedForce"].setUseSwitchingFunction(False)
         forces["NonbondedForce"].setUseDispersionCorrection(True)
-        forces["NonbondedForce"].setEwaldErrorTolerance(1e-4)
+        forces["NonbondedForce"].setEwaldErrorTolerance(1e-4)  # default is 5e-4
+        oxygen_parameters = forces["NonbondedForce"].getParticleParameters(0)
+        self.charge_O = oxygen_parameters[0].value_in_unit(unit.elementary_charge)
+        self.sigma_O = oxygen_parameters[1].value_in_unit(unit.nanometer)
+        self.epsilon_O = oxygen_parameters[2].value_in_unit(unit.kilojoule_per_mole)
+
+        if "customLJ" in water_type:
+            # remove LJ interaction
+            oxygen_parameters[2] *= 0  # set epsilon_O to zero
+            for i in range(0, system.getNumParticles(), n_sites):
+                forces["NonbondedForce"].setParticleParameters(i, *oxygen_parameters)
+
+            # add equivalent CustomNonbondedForce
+            Ulj_str = f"4*{self.epsilon_O}*(({self.sigma_O}/r)^12-({self.sigma_O}/r)^6)"
+            energy_expression = f"select(isOxy1*isOxy2, {Ulj_str}, 0)"
+            lj_OO = openmm.CustomNonbondedForce(energy_expression)
+            lj_OO.setNonbondedMethod(openmm.CustomNonbondedForce.CutoffPeriodic)
+            lj_OO.setCutoffDistance(nonbondedCutoff)
+            lj_OO.setUseLongRangeCorrection(True)
+
+            # Oindices = np.arange(0, system.getNumParticles(), n_sites)
+            # lj_OO.addInteractionGroup(Oindices, Oindices) #for obscure reasons this does not work as it should
+            # for _ in range(system.getNumParticles()):
+            #     lj_OO.addParticle()
+            lj_OO.addPerParticleParameter("isOxy")
+            for i in range(system.getNumParticles()):
+                if i % n_sites == 0:
+                    lj_OO.addParticle([1])
+                else:
+                    lj_OO.addParticle([0])
+            bonds = []
+            for i in range(0, system.getNumParticles(), n_sites):
+                for j in range(1, n_sites):
+                    bonds.append((i, i + j))
+            lj_OO.createExclusionsFromBonds(bonds, 2)
+            system.addForce(lj_OO)
+            forces = {f.__class__.__name__: f for f in system.getForces()}
 
         self.system = system
-
-        # see https://github.com/openmm/openmm/blob/master/wrappers/python/openmm/app/data/tip4pew.xml
-        # new_force = "select(step(r - 0.28414902091026306), 4*epsilon0*((sigma0/r)^12-(sigma0/r)^6), 3.0*r^2 + -310.4779357910156*r + 92.69363403320312)"  # TODO define a force
-        # OOforce = openmm.CustomNonbondedForce(
-        #     f"{new_force}; sigma0=0.316435; epsilon0=0.680946"
-        # )
-        # # OOforce = openmm.CustomNonbondedForce(
-        # #     f"-4*epsilon0*((sigma0/r)^12-(sigma0/r)^6)+{new_force}; sigma0=0.316435; epsilon0=0.680946"
-        # # )
-        # OOforce.addInteractionGroup(
-        #     np.arange(0, n_atoms, n_sites), np.arange(0, n_atoms, n_sites)
-        # )
-        # self.system.addForce(OOforce)
-        # for i in range(system.getNumParticles()):
-        #     OOforce.addParticle([])
-
         self.topology = topology
         self.mdtraj_topology = mdtraj_topology
 
@@ -144,9 +115,7 @@ class WaterModel:
 
         self._positions = np.array(positions)
         self._box = np.array(box)
-        self.is_box_orthorombic = not np.count_nonzero(
-            box - np.diag(np.diagonal(box))
-        )
+        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diagonal(box)))
 
         self.n_waters = n_waters
         self.n_sites = n_sites
@@ -171,9 +140,7 @@ class WaterModel:
         self._box = np.array(box)
         self.topology.setPeriodicBoxVectors(box)
         self.system.setDefaultPeriodicBoxVectors(*box)
-        self.is_box_orthorombic = not np.count_nonzero(
-            box - np.diag(np.diagonal(box))
-        )
+        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diagonal(box)))
 
     @staticmethod
     def generate_mdtraj_topology(n_waters, n_sites=4):
@@ -220,14 +187,10 @@ class WaterModel:
         if barostat is None:
             pass
         elif barostat == "iso":
-            self.system.addForce(
-                openmm.MonteCarloBarostat(pressure, temperature)
-            )
+            self.system.addForce(openmm.MonteCarloBarostat(pressure, temperature))
         elif barostat == "aniso":
             self.system.addForce(
-                openmm.MonteCarloAnisotropicBarostat(
-                    3 * [pressure], temperature
-                )
+                openmm.MonteCarloAnisotropicBarostat(3 * [pressure], temperature)
             )
         elif barostat == "tri":
             self.system.addForce(
@@ -286,6 +249,68 @@ class WaterModel:
             init_info = json.load(f)
         return WaterModel(**init_info)
 
+    def setup_simulation(
+        self,
+        temperature,
+        frictionCoeff=1 / unit.picosecond,
+        stepSize=1 * unit.femtosecond,
+        minimizeEnergy=False,
+    ):
+        integrator = openmm.LangevinMiddleIntegrator(
+            temperature, frictionCoeff, stepSize
+        )
+        if self.barostat is not None:
+            for force in self.system.getForces():
+                if isinstance(
+                    force,
+                    (
+                        openmm.MonteCarloBarostat,
+                        openmm.MonteCarloAnisotropicBarostat,
+                        openmm.MonteCarloFlexibleBarostat,
+                    ),
+                ):
+                    force.setDefaultTemperature(temperature)
+        simulation = openmm.app.Simulation(self.topology, self.system, integrator)
+        simulation.context.setPositions(self.positions)
+
+        if minimizeEnergy:
+            print(
+                "old energy:",
+                simulation.context.getState(getEnergy=True)
+                .getPotentialEnergy()
+                .value_in_unit(unit.kilojoule_per_mole),
+            )
+            simulation.minimizeEnergy()  # volume is not changed
+            print(
+                "new energy:",
+                simulation.context.getState(getEnergy=True)
+                .getPotentialEnergy()
+                .value_in_unit(unit.kilojoule_per_mole),
+            )
+
+        return simulation
+
+    def set_customLJ(self, energy_expression, context=None, keep_positions=False):
+        """energy_expression: the new Lennard Jones expression, using 'r' for atoms distance"""
+
+        if "customLJ" not in self.water_type:
+            raise ValueError(
+                f"use water_type={self.water_type}-customLJ to set custom LJ interactions"
+            )
+
+        forces = {f.__class__.__name__: f for f in self.system.getForces()}
+        forces["CustomNonbondedForce"].setEnergyFunction(
+            f"select(isOxy1*isOxy2, {energy_expression}, 0)"
+        )
+
+        if context is not None:
+            if keep_positions:
+                pos = context.getState(getPositions=True).getPositions()
+                context.reinitialize()
+                context.setPositions(pos)
+            else:
+                context.reinitialize()
+
     def plot_2Dview(self, pos=None, box=None, toPBC=False):
         if pos is None:
             pos = self._positions
@@ -300,8 +325,8 @@ class WaterModel:
             alpha = 0.05
         else:
             raise ValueError("pos should be of shape (nframes, natoms, 3)")
-        if pos.shape[-2] != self.n_atoms or pos.shape[-1] != 3:
-            raise ValueError("pos should be of shape (nframes, natoms, 3)")
+        if pos.shape[-1] != 3:
+            raise ValueError("pos should be in 3D")
 
         av_box = box.mean(axis=0) if len(box.shape) == 3 else box
         if av_box.shape != (3, 3):
@@ -311,9 +336,7 @@ class WaterModel:
             if self.is_box_orthorombic:
                 mypos = (pos / np.diagonal(av_box) % 1) * np.diagonal(av_box)
             else:
-                raise NotImplementedError(
-                    "only available for fixed orthorombic box"
-                )
+                raise NotImplementedError("only available for fixed orthorombic box")
         else:
             mypos = pos
 
@@ -327,21 +350,21 @@ class WaterModel:
             plt.scatter(
                 mypos[..., 1 :: self.n_sites, i],
                 mypos[..., 1 :: self.n_sites, ii],
-                marker=marker,  # type: ignore
+                marker=marker,
                 alpha=alpha,
                 c="gray",
             )
             plt.scatter(
                 mypos[..., 2 :: self.n_sites, i],
                 mypos[..., 2 :: self.n_sites, ii],
-                marker=marker,  # type: ignore
+                marker=marker,
                 alpha=alpha,
                 c="gray",
             )
             plt.scatter(
                 mypos[..., :: self.n_sites, i],
                 mypos[..., :: self.n_sites, ii],
-                marker=marker,  # type: ignore
+                marker=marker,
                 alpha=alpha,
                 c="r",
             )
@@ -359,18 +382,9 @@ class WaterModel:
             if not self.is_box_orthorombic:
                 coord2 = [
                     coord[1],
-                    [
-                        coord[1][0] + av_box[iii, i],
-                        coord[1][1] + av_box[iii, ii],
-                    ],
-                    [
-                        coord[2][0] + av_box[iii, i],
-                        coord[2][1] + av_box[iii, ii],
-                    ],
-                    [
-                        coord[3][0] + av_box[iii, i],
-                        coord[3][1] + av_box[iii, ii],
-                    ],
+                    [coord[1][0] + av_box[iii, i], coord[1][1] + av_box[iii, ii]],
+                    [coord[2][0] + av_box[iii, i], coord[2][1] + av_box[iii, ii]],
+                    [coord[3][0] + av_box[iii, i], coord[3][1] + av_box[iii, ii]],
                     coord[3],
                 ]
                 xs, ys = zip(*coord2)
@@ -384,19 +398,36 @@ class WaterModel:
             plt.gca().set_aspect(1)
         plt.show()
 
+    def get_mdtraj(self, pos=None, box=None):
+        if pos is None:
+            pos = self._positions
+        if box is None:
+            box = self._box
+
+        traj = md.Trajectory(pos, self.mdtraj_topology)
+        traj.unitcell_vectors = np.resize(box, (len(traj), 3, 3))
+
+        return traj
+
+    def plot_rdf(
+        self, pos=None, box=None, r_range=[0, 1], selection="name == O", **kwargs
+    ):
+        traj = self.get_mdtraj(pos, box)
+        ij = self.mdtraj_topology.select_pairs(selection, selection)
+        rdf = md.compute_rdf(traj, ij, r_range=r_range)
+
+        plt.plot(*rdf, **kwargs)
+        plt.ylabel("g(r)")
+        plt.xlabel("r [nm]")
+        plt.xlim(r_range)
+
     def get_view(self, pos=None, box=None):
         """visualize in notebook with nglview"""
         if nv is None:
             print("+++ WARNING: nglview not available +++", file=stderr)
             return None
 
-        if pos is None:
-            pos = self._positions
-        if box is None:
-            box = self._box
-        traj = md.Trajectory(pos, self.mdtraj_topology)
-        traj.unitcell_vectors = np.resize(box, (len(traj), 3, 3))
-        view = nv.show_mdtraj(traj)
+        view = nv.show_mdtraj(self.get_mdtraj(pos, box))
         view.add_representation("ball+stick", selection="water")
         view.add_unitcell()
         return view

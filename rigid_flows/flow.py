@@ -352,7 +352,7 @@ class AuxUpdate(eqx.Module):
         self.num_low_rank = num_low_rank
         self.net = Dense(
             num_inp=num_dims + num_pos,
-            num_out=(2 + 2 * self.num_low_rank) * prod(auxiliary_shape),
+            num_out=(2 + 2 * self.num_low_rank) * auxiliary_shape[-1],
             key=next(chain),
             reduce_output=(len(self.auxiliary_shape) == 1),
             **kwargs,

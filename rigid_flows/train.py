@@ -159,7 +159,8 @@ def batch_loss(
             weight_vg_model=weight_vg_model,
             weight_vg_target=weight_vg_target,
             fm_aggregation=fm_aggregation,
-        )
+        ),
+        axis_name="batch",
     )(jax.random.split(key, num_samples))
     losses = jax.tree_map(jnp.mean, losses)
     total_loss_agg = jnp.mean(total_loss)

@@ -1,6 +1,6 @@
 import jax
 import jax.numpy as jnp
-from jax import Array
+from jax import Array, float0
 from jax_dataclasses import pytree_dataclass
 
 from flox.flow import Transformed
@@ -17,11 +17,11 @@ def low_rank_matmul(us, vs, x, *, residual: bool):
     return res + jnp.einsum("ki, kj, ...j -> ...i", us, vs, x)
 
 
-def invert_and_ldj_stable(u, v, U_inv, V_inv):
+def invert_and_ldj_stable(u, v, U_inv, V_inv, regularizer: float):
     u_inv = low_rank_matmul(U_inv, V_inv, u, residual=True)
 
     # guarantee invertibility
-    v = v * jax.nn.softplus(u_inv @ v + jnp.sqrt(2))
+    v = v * jax.nn.softplus(u_inv @ v + jnp.sqrt(2) - regularizer)
 
     ldj = jnp.log1p(u_inv @ v)
     v_inv = low_rank_matmul(V_inv, U_inv, v, residual=True)
@@ -29,7 +29,7 @@ def invert_and_ldj_stable(u, v, U_inv, V_inv):
     return v, u_inv, v_inv, ldj
 
 
-def invert_uv_stable(U, V):
+def invert_uv_stable(U, V, regularizer: float):
     k, n = U.shape
     U_inv = jnp.zeros_like(U)
     V_inv = jnp.zeros_like(U)
@@ -38,7 +38,9 @@ def invert_uv_stable(U, V):
     def body(carry, args):
         i, u, v = args
         ldj, U_inv, V_inv = carry
-        v, u_inv, v_inv, ldj_new = invert_and_ldj_stable(u, v, U_inv, V_inv)
+        v, u_inv, v_inv, ldj_new = invert_and_ldj_stable(
+            u, v, U_inv, V_inv, regularizer
+        )
         ldj += ldj_new
         U_inv += jnp.eye(k)[i][:, None] * u_inv[None]
         V_inv += jnp.eye(k)[i][:, None] * v_inv[None]
@@ -85,6 +87,7 @@ class LowRankFlow:
 
     us: Array
     vs: Array
+    regularizer: float
 
     def forward(self, input: Array):
         shape = input.shape
@@ -93,7 +96,7 @@ class LowRankFlow:
         us = self.us.reshape(-1, input.shape[-1])
         vs = self.vs.reshape(-1, input.shape[-1])
 
-        vs, us_inv, vs_inv, ldj = invert_uv_stable(us, vs)
+        vs, us_inv, vs_inv, ldj = invert_uv_stable(us, vs, self.regularizer)
 
         output, ldj = apply_low_rank_mat_mul(input, us, vs, us_inv, vs_inv, ldj)
         output = output.reshape(shape)
@@ -107,7 +110,7 @@ class LowRankFlow:
         us = self.us.reshape(-1, input.shape[-1])
         vs = self.vs.reshape(-1, input.shape[-1])
 
-        vs, us_inv, vs_inv, ldj = invert_uv_stable(us, vs)
+        vs, us_inv, vs_inv, ldj = invert_uv_stable(us, vs, self.regularizer)
         us, vs, us_inv, vs_inv = us_inv, vs_inv, us, vs
         ldj = -ldj
 

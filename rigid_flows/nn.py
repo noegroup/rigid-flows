@@ -82,8 +82,9 @@ class Dense(eqx.Module):
         self.seq_len = seq_len
         self.encoder = eqx.nn.Sequential(
             [
-                eqx.nn.LayerNorm(seq_len * num_inp, elementwise_affine=True),
                 eqx.nn.Linear(seq_len * num_inp, num_hidden, key=next(chain)),
+                eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
+                eqx.nn.Lambda(ACTIVATION_FUNCTIONS[activation]),
             ]
         )
         if activation not in ACTIVATION_FUNCTIONS:
@@ -93,8 +94,8 @@ class Dense(eqx.Module):
             eqx.nn.Sequential(
                 [
                     eqx.nn.Linear(num_hidden, num_hidden, key=next(chain)),
-                    eqx.nn.Lambda(ACTIVATION_FUNCTIONS[activation]),
                     eqx.nn.LayerNorm(num_hidden, elementwise_affine=True),
+                    eqx.nn.Lambda(ACTIVATION_FUNCTIONS[activation]),
                 ]
             )
             for _ in range(num_blocks)

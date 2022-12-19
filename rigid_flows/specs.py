@@ -22,6 +22,7 @@ class ReportingSpecifications:
 class PosEncoderSpecification:
     seq_len: int
     activation: str
+    num_pos: int
     num_hidden: int
     num_blocks: int
 
@@ -31,8 +32,12 @@ class PosAndAuxUpdateSpecification:
     seq_len: int
     activation: str
     num_dims: int
+    num_pos: int
     num_hidden: int
     num_blocks: int
+    transform: str
+    num_low_rank: int
+    low_rank_regularizer: float
 
 
 @pytree_dataclass(frozen=True)

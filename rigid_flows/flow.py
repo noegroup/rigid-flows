@@ -16,23 +16,14 @@ from jaxtyping import Float
 from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.api import C
-from flox.flow import (
-    DoubleMoebius,
-    Pipe,
-    Transform,
-    Transformed,
-    VectorizedTransform,
-)
+from flox._src.flow.impl import Affine
+from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .lowrank import LowRankFlow  # type: ignore
 from .nn import Dense, QuatEncoder
-from .specs import (
-    CouplingSpecification,
-    FlowSpecification,
-    PreprocessingSpecification,
-)
+from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -324,13 +315,17 @@ class AuxUpdate(eqx.Module):
     net: Dense | eqx.nn.Sequential
     auxiliary_shape: tuple[int, ...]
     num_low_rank: int
+    low_rank_regularizer: float
+    transform: str
 
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
-        num_pos: int = 3,
-        num_dims: int = 64,
-        num_low_rank: int = 5,
+        num_pos: int,
+        num_dims: int,
+        num_low_rank: int,
+        low_rank_regularizer: float,
+        transform: str,
         *,
         key: KeyArray,
         **kwargs,
@@ -350,6 +345,8 @@ class AuxUpdate(eqx.Module):
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.auxiliary_shape = auxiliary_shape
         self.num_low_rank = num_low_rank
+        self.low_rank_regularizer = low_rank_regularizer
+        self.transform = transform
         self.net = Dense(
             num_inp=num_dims + num_pos,
             num_out=(2 + 2 * self.num_low_rank) * auxiliary_shape[-1],
@@ -380,16 +377,25 @@ class AuxUpdate(eqx.Module):
         new = new.reshape(input.aux.shape)
         mix = mix.reshape(input.aux.shape)
         mix = mix * 1e-1
-        uvs = uvs.reshape(2, -1) * 1e-1
-        return new, mix, uvs
+        u, v = uvs.reshape(2, -1)
+        u = u / jnp.sqrt(prod(u.shape)) * 1e-1
+        v = v / jnp.sqrt(prod(v.shape)) * 1e-1
+        return new, mix, u, v
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        new, mix, uvs = self.params(input)
+        new, mix, u, v = self.params(input)
+        match self.transform:
+            case "gated":
+                transform = GatedShift(new, mix)
+            case "affine":
+                transform = Affine(new, mix)
+            case _:
+                raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                LowRankFlow(*uvs),
-                GatedShift(new, mix),
+                LowRankFlow(u, v, self.low_rank_regularizer),
+                transform,
             ]
         )
         aux, ldj = unpack(pipe.forward(input.aux))
@@ -397,11 +403,18 @@ class AuxUpdate(eqx.Module):
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        new, mix, uvs = self.params(input)
+        new, mix, u, v = self.params(input)
+        match self.transform:
+            case "gated":
+                transform = GatedShift(new, mix)
+            case "affine":
+                transform = Affine(new, mix)
+            case _:
+                raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                LowRankFlow(*uvs),
-                GatedShift(new, mix),
+                LowRankFlow(u, v, self.low_rank_regularizer),
+                transform,
             ]
         )
         aux, ldj = unpack(pipe.inverse(input.aux))
@@ -414,12 +427,17 @@ class PosUpdate(eqx.Module):
     symmetrizer: QuatEncoder
     net: Dense
     num_low_rank: int
+    low_rank_regularizer: float
+    transform: str
 
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
-        num_dims: int = 64,
-        num_low_rank: int = 5,
+        num_dims: int,
+        num_pos: int,
+        num_low_rank: int,
+        low_rank_regularizer: float,
+        transform: str,
         *,
         key: KeyArray,
         **kwargs,
@@ -441,10 +459,12 @@ class PosUpdate(eqx.Module):
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.net = Dense(
             num_inp=num_dims + auxiliary_shape[-1],
-            num_out=(2 + 2 * num_low_rank) * 3,
+            num_out=(2 + 2 * num_low_rank) * num_pos,
             key=next(chain),
             **kwargs,
         )
+        self.low_rank_regularizer = low_rank_regularizer
+        self.transform = transform
 
     def params(self, input: State):  # -> tuple[Array, Array]:
         """Compute the parameters for the affine transform
@@ -472,17 +492,25 @@ class PosUpdate(eqx.Module):
         new = new.reshape(input.pos.shape)
         mix = mix.reshape(input.pos.shape)
         mix = mix * 1e-1
-        uvs = uvs.reshape(2, -1) * 1e-1
-
-        return new, mix, uvs
+        u, v = uvs.reshape(2, -1)
+        u = u / jnp.sqrt(prod(u.shape)) * 1e-1
+        v = v / jnp.sqrt(prod(v.shape)) * 1e-1
+        return new, mix, u, v
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        new, mix, uvs = self.params(input)
+        new, mix, u, v = self.params(input)
+        match self.transform:
+            case "gated":
+                transform = GatedShift(new, mix)
+            case "affine":
+                transform = Affine(new, mix)
+            case _:
+                raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                LowRankFlow(*uvs),
-                GatedShift(new, mix),
+                LowRankFlow(u, v, self.low_rank_regularizer),
+                transform,
             ]
         )
         pos, ldj = unpack(pipe.forward(input.pos))
@@ -490,11 +518,18 @@ class PosUpdate(eqx.Module):
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        new, mix, uvs = self.params(input)
+        new, mix, u, v = self.params(input)
+        match self.transform:
+            case "gated":
+                transform = GatedShift(new, mix)
+            case "affine":
+                transform = Affine(new, mix)
+            case _:
+                raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                LowRankFlow(*uvs),
-                GatedShift(new, mix),
+                LowRankFlow(u, v, self.low_rank_regularizer),
+                transform,
             ]
         )
         pos, ldj = unpack(pipe.inverse(input.pos))
@@ -512,7 +547,7 @@ class PositionEncoder(eqx.Module):
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
-        num_pos: int = 3,
+        num_pos: int,
         *,
         key: KeyArray,
         **kwargs,
@@ -614,24 +649,28 @@ def _preprocess(
         Pipe[AugmentedData, State]: the initial transform
     """
     chain = key_chain(key)
-    # aux_block = [
-    #     AuxUpdate(
-    #         auxiliary_shape=auxiliary_shape,
-    #         **asdict(specs.auxiliary_update),
-    #         key=next(chain),
-    #     )
-    # ]
-    # pos_block = [
-    #     PositionEncoder(**asdict(specs.position_encoder), key=next(chain))
-    # ]
-    # if specs.act_norm:
-    #     pos_block += [ActNorm(lenses.lens.pos)]
-    #     aux_block += [ActNorm(lenses.lens.aux)]
+    aux_block = [
+        AuxUpdate(
+            auxiliary_shape=auxiliary_shape,
+            **asdict(specs.auxiliary_update),
+            key=next(chain),
+        )
+    ]
+    pos_block = [
+        PositionEncoder(
+            auxiliary_shape=auxiliary_shape,
+            **asdict(specs.position_encoder),
+            key=next(chain),
+        )
+    ]
+    if specs.act_norm:
+        pos_block += [ActNorm(lenses.lens.pos)]
+        aux_block += [ActNorm(lenses.lens.aux)]
     return Pipe(
         [
             InitialTransform(),
-            # *aux_block,
-            # *pos_block,
+            *aux_block,
+            *pos_block,
         ]
     )
 

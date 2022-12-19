@@ -31,14 +31,19 @@ model:
       act_norm: true
       auxiliary_update:
         seq_len: 16
-        activation: gelu
+        activation: tanh
+        num_pos: 3
         num_dims: 64
         num_hidden: 256
         num_blocks: 1
+        num_low_rank: 10
+        low_rank_regularizer: 0.
+        transform: affine
       position_encoder:
         seq_len: 16
-        activation: gelu
+        activation: tanh
         num_dims: 64
+        num_pos: 3
         num_hidden: 256
         num_blocks: 1
 
@@ -47,19 +52,27 @@ model:
       - num_repetitions: 1
         auxiliary_update:
           seq_len: 16
-          activation: gelu
+          activation: tanh
+          num_pos: 3
           num_dims: 64
           num_hidden: 256
           num_blocks: 1
+          num_low_rank: 10
+          low_rank_regularizer: 0.
+          transform: affine
         position_update:
           seq_len: 16
-          activation: gelu
+          activation: tanh
+          num_pos: 3
           num_dims: 64
           num_hidden: 256
           num_blocks: 1
+          num_low_rank: 10
+          low_rank_regularizer: 0.
+          transform: affine
         quaternion_update:
           seq_len: 16
-          activation: gelu
+          activation: tanh
           num_hidden: 256
           num_blocks: 1
         act_norm: true

@@ -352,9 +352,10 @@ class QuatUpdate(eqx.Module):
         out = self.net(feats) * 1e-1
 
         mat, reflection = jnp.split(out, (16,), -1)  # type: ignore
+        mat = mat * 1e-1
 
         reflection = reflection.reshape(input.rot.shape)
-        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)(
+        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.99)(
             reflection
         )
 

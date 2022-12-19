@@ -673,9 +673,9 @@ def _preprocess(
             key=next(chain),
         )
     ]
-    if specs.act_norm:
-        pos_block += [ActNorm(lenses.lens.pos)]
-        aux_block += [ActNorm(lenses.lens.aux)]
+    # if specs.act_norm:
+    #     pos_block += [ActNorm(lenses.lens.pos)]
+    #     aux_block += [ActNorm(lenses.lens.aux)]
     return Pipe(
         [
             InitialTransform(),
@@ -721,9 +721,9 @@ def _coupling(
             ),
         ]
 
-        if specs.act_norm:
-            pos_block += [ActNorm(lenses.lens.pos)]
-            aux_block += [ActNorm(lenses.lens.aux)]
+        # if specs.act_norm:
+        #     pos_block += [ActNorm(lenses.lens.pos)]
+        #     aux_block += [ActNorm(lenses.lens.aux)]
 
         blocks += [
             *aux_block,

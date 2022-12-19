@@ -12,7 +12,6 @@ from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 from jaxtyping import Float
-from lowrank import LowRankFlow  # type: ignore
 
 from flox import geom
 from flox._src.flow import rigid
@@ -27,6 +26,7 @@ from flox.flow import (
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
+from .lowrank import LowRankFlow  # type: ignore
 from .nn import Dense, QuatEncoder
 from .specs import (
     CouplingSpecification,

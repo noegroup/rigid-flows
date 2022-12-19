@@ -1,3 +1,4 @@
+from cmath import exp
 from dataclasses import asdict, astuple
 from itertools import accumulate
 from math import prod
@@ -183,8 +184,12 @@ class ActNorm(eqx.Module):
         assert self.mean is not None
         assert self.log_std is not None
         val = self.lens.get()(input)
-        val = (val - self.mean) * jnp.exp(-self.log_std)
-        ldj = -self.log_std.sum()
+        scale = jax.nn.softplus(self.log_std) + 1e-6
+
+        val = (val - self.mean) / scale
+
+        ldj = -jnp.log(scale).sum()
+
         output = self.lens.set(val)(input)
         return Transformed(output, ldj)
 
@@ -192,14 +197,24 @@ class ActNorm(eqx.Module):
         assert self.mean is not None
         assert self.log_std is not None
         val = self.lens.get()(input)
-        val = val * jnp.exp(self.log_std) + self.mean
-        ldj = self.log_std.sum()
+        scale = jax.nn.softplus(self.log_std) + 1e-6
+
+        val = val * scale + self.mean
+
+        ldj = jnp.log(scale).sum()
+
         output = self.lens.set(val)(input)
         return Transformed(output, ldj)
 
     def initialize(self, batch: State):
         val = self.lens.get()(batch)
-        return ActNorm(self.lens, jnp.mean(val, axis=0), jnp.std(val, axis=0))
+        std = 1e-6 + jnp.std(val, axis=0)
+        log_std = jnp.log(jnp.exp(std) - 1)
+        return ActNorm(
+            self.lens,
+            jnp.mean(val, axis=0),
+            log_std,
+        )
 
 
 def initialize_actnorm(flow: Pipe, batch: Any):
@@ -404,7 +419,7 @@ class AuxUpdate(eqx.Module):
                 raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                # LowRankFlow(u, v, self.low_rank_regularizer),
+                LowRankFlow(u, v, self.low_rank_regularizer),
                 transform,
             ]
         )
@@ -423,7 +438,7 @@ class AuxUpdate(eqx.Module):
                 raise ValueError(f"unknown transform {self.transform}")
         pipe = Pipe(
             [
-                # LowRankFlow(u, v, self.low_rank_regularizer),
+                LowRankFlow(u, v, self.low_rank_regularizer),
                 transform,
             ]
         )
@@ -673,9 +688,9 @@ def _preprocess(
             key=next(chain),
         )
     ]
-    # if specs.act_norm:
-    #     pos_block += [ActNorm(lenses.lens.pos)]
-    #     aux_block += [ActNorm(lenses.lens.aux)]
+    if specs.act_norm:
+        pos_block += [ActNorm(lenses.lens.pos)]
+        aux_block += [ActNorm(lenses.lens.aux)]
     return Pipe(
         [
             InitialTransform(),
@@ -721,9 +736,9 @@ def _coupling(
             ),
         ]
 
-        # if specs.act_norm:
-        #     pos_block += [ActNorm(lenses.lens.pos)]
-        #     aux_block += [ActNorm(lenses.lens.aux)]
+        if specs.act_norm:
+            pos_block += [ActNorm(lenses.lens.pos)]
+            aux_block += [ActNorm(lenses.lens.aux)]
 
         blocks += [
             *aux_block,

@@ -4,8 +4,8 @@ seed: 42
 global_step: 0
 
 reporting:
-  num_samples: 1
-  num_samples_per_batch: 1
+  num_samples: 1000
+  num_samples_per_batch: 1000
   plot_quaternions: null # [1, 5] 
   plot_oxygens: true
   plot_energy_histograms: false
@@ -31,17 +31,17 @@ model:
       act_norm: true
       auxiliary_update:
         seq_len: 16
-        activation: tanh
+        activation: gelu
         num_pos: 3
         num_dims: 64
         num_hidden: 256
         num_blocks: 1
         num_low_rank: 10
         low_rank_regularizer: 0.
-        transform: affine
+        transform: gated
       position_encoder:
         seq_len: 16
-        activation: tanh
+        activation: gelu
         num_dims: 64
         num_pos: 3
         num_hidden: 256
@@ -52,27 +52,27 @@ model:
       - num_repetitions: 1
         auxiliary_update:
           seq_len: 16
-          activation: tanh
+          activation: gelu
           num_pos: 3
           num_dims: 64
           num_hidden: 256
           num_blocks: 1
           num_low_rank: 10
           low_rank_regularizer: 0.
-          transform: affine
+          transform: gated
         position_update:
           seq_len: 16
-          activation: tanh
+          activation: gelu
           num_pos: 3
           num_dims: 64
           num_hidden: 256
           num_blocks: 1
           num_low_rank: 10
           low_rank_regularizer: 0.
-          transform: affine
+          transform: gated
         quaternion_update:
           seq_len: 16
-          activation: tanh
+          activation: gelu
           num_hidden: 256
           num_blocks: 1
         act_norm: true

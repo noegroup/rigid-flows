@@ -102,8 +102,8 @@ system:
   fixed_box: true
 
   softcore_cutoff: 0.8
-  softcore_potential: "square"
-  softcore_slope: 10.
+  softcore_potential: "linear"
+  softcore_slope: 2.
 
 
 # training definition

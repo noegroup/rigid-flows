@@ -35,10 +35,10 @@ def backup_config_file(run_dir: str, specs_path: str):
     shutil.copy(specs_path, f"{run_dir}/config.yaml")
 
 
-def setup_tensorboard(run_dir: str):
-    local_run_dir = (
-        f"{run_dir}/{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}"
-    )
+def setup_tensorboard(run_dir: str, label: str):
+    import socket
+
+    local_run_dir = f"{run_dir}/{socket.gethostname()}_{label}_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}"
 
     writer = tf.summary.create_file_writer(local_run_dir)
 
@@ -139,9 +139,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--specs", type=str, required=True)
     parser.add_argument("--run_dir", type=str, required=True)
+    parser.add_argument("--label", type=str, required=False)
     args = parser.parse_args()
 
-    writer, local_run_dir = setup_tensorboard(args.run_dir)
+    writer, local_run_dir = setup_tensorboard(args.run_dir, args.label)
 
     logging.getLogger().setLevel(logging.INFO)
 

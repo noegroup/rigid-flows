@@ -1,5 +1,7 @@
 from dataclasses import asdict, astuple
-from typing import Any
+from functools import partial, reduce
+from turtle import forward
+from typing import Any, cast
 
 import equinox as eqx
 import jax
@@ -123,8 +125,6 @@ class LDU:
         m = (l + jnp.eye(n)) @ jnp.diag(jnp.exp(d)) @ (u + jnp.eye(n))
         m = jnp.linalg.inv(m)
 
-        # output = (m @ input - self.t) + self.t
-
         match self.apply:
             case "left":
                 output = m @ input
@@ -135,6 +135,58 @@ class LDU:
 
         ldj = -d.sum()
         return Transformed(output, ldj)
+
+
+from flox.flow import Inverted, Transform, Transformed, bind, pure
+
+
+@pytree_dataclass(frozen=True)
+class LayerStackedPipe(Pipe):
+
+    use_scan: bool
+
+    def scan(self, input: Any, inverse: bool) -> Transformed[Any]:
+        params, static = eqx.partition(self.transforms, eqx.is_array)  # type: ignore
+        params = jax.tree_map(
+            lambda *args: jnp.stack(args),
+            *params,
+            is_leaf=lambda x: isinstance(x, jnp.ndarray),
+        )
+
+        def body(x, param):
+            fn: Transform = cast(Transform, eqx.combine(param, static[0]))
+            if inverse:
+                fn = Inverted(fn)
+            x = bind(x, fn)
+            return x, None
+
+        out, _ = jax.lax.scan(body, pure(input), params, reverse=inverse)
+        return out
+
+    def forward(self, input: Array):
+        if self.use_scan:
+            return self.scan(input, inverse=False)
+        else:
+            return super().forward(input)
+
+    def inverse(self, input: Array):
+        if self.use_scan:
+            return self.scan(input, inverse=True)
+        else:
+            return super().forward(input)
+
+
+def toggle_layer_stack(flow: Transform, toggle: bool) -> Transform:
+    if isinstance(flow, LayerStackedPipe):
+        return LayerStackedPipe(flow.transforms, use_scan=toggle)
+    elif isinstance(flow, Pipe):
+        return Pipe(
+            tuple(
+                map(partial(toggle_layer_stack, toggle=toggle), flow.transforms)
+            )
+        )
+    else:
+        return flow
 
 
 @pytree_dataclass
@@ -261,18 +313,20 @@ class ActNorm(eqx.Module):
         )
 
 
-def initialize_actnorm(flow: Pipe, batch: Any):
-    layers = []
-    for layer in flow.transforms:
-        if isinstance(layer, Pipe):
-            layer = initialize_actnorm(layer, batch)
+def initialize_actnorm(flow: Transform, batch: Any):
 
-        if isinstance(layer, ActNorm):
-            layer = layer.initialize(batch)
-        else:
-            batch, _ = unpack(jax.vmap(layer.forward)(batch))
-        layers.append(layer)
-    return Pipe(layers)
+    if isinstance(flow, Pipe):
+        layers = []
+        for layer in flow.transforms:
+            layer, batch = initialize_actnorm(layer, batch)
+            layers.append(layer)
+        return Pipe(layers), batch
+
+    if isinstance(flow, ActNorm):
+        flow = flow.initialize(batch)
+
+    batch, _ = unpack(jax.vmap(flow.forward)(batch))
+    return flow, batch
 
 
 @pytree_dataclass(frozen=True)
@@ -348,7 +402,7 @@ class QuatUpdate(eqx.Module):
         mat = mat * 1e-1
 
         reflection = reflection.reshape(input.rot.shape)
-        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.99)(
+        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)(
             reflection
         )
 
@@ -707,7 +761,7 @@ def _coupling(
     key: KeyArray,
     auxiliary_shape: tuple[int, ...],
     specs: CouplingSpecification,
-) -> Pipe[State, State]:
+) -> Transform[State, State]:
     """Creates a coupling block consisting of:
 
      - an update to the auxilaries
@@ -743,16 +797,19 @@ def _coupling(
             pos_block += [ActNorm(lenses.lens.pos)]
             aux_block += [ActNorm(lenses.lens.aux)]
 
-        blocks += [
-            *aux_block,
-            *pos_block,
-            QuatUpdate(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.quaternion_update),
-                key=next(chain),
-            ),
-        ]
-    return Pipe[State, State](blocks)
+        sub_block = Pipe(
+            [
+                *aux_block,
+                *pos_block,
+                QuatUpdate(
+                    auxiliary_shape=auxiliary_shape,
+                    **asdict(specs.quaternion_update),
+                    key=next(chain),
+                ),
+            ]
+        )
+        blocks.append(sub_block)
+    return Pipe(blocks)
 
 
 def build_flow(
@@ -774,9 +831,14 @@ def build_flow(
         Pipe[AugmentedData, State]: the final flow
     """
     chain = key_chain(key)
-    blocks: list[Transform[Any, Any]] = [
-        _preprocess(next(chain), auxiliary_shape, specs.preprocessing)
-    ]
+    blocks = []
     for coupling in specs.couplings:
         blocks.append(_coupling(next(chain), auxiliary_shape, coupling))
-    return Pipe[AugmentedData, State](blocks)
+
+    couplings = LayerStackedPipe(blocks, use_scan=False)
+    return Pipe[AugmentedData, State](
+        [
+            _preprocess(next(chain), auxiliary_shape, specs.preprocessing),
+            couplings,
+        ]
+    )

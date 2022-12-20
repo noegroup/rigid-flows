@@ -9,7 +9,6 @@ import equinox as eqx
 import git
 import jax
 import tensorflow as tf  # type: ignore
-from git import Repo
 from rigid_flows.data import AugmentedData
 from rigid_flows.density import (
     BaseDensity,
@@ -17,7 +16,12 @@ from rigid_flows.density import (
     PositionPrior,
     TargetDensity,
 )
-from rigid_flows.flow import State, build_flow, initialize_actnorm
+from rigid_flows.flow import (
+    State,
+    build_flow,
+    initialize_actnorm,
+    toggle_layer_stack,
+)
 from rigid_flows.reporting import Reporter, pretty_json
 from rigid_flows.specs import ExperimentSpecification
 from rigid_flows.train import run_training_stage
@@ -69,8 +73,12 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
 
     @eqx.filter_jit
     def init_actnorm(flow, key):
-        actnorm_batch = jax.vmap(target.sample)(jax.random.split(key, 1024)).obj
-        flow = initialize_actnorm(flow, actnorm_batch)
+        actnorm_batch = jax.vmap(target.sample)(
+            jax.random.split(key, specs.act_norm_init_samples)
+        ).obj
+        flow = toggle_layer_stack(flow, False)
+        flow, _ = initialize_actnorm(flow, actnorm_batch)
+        flow = toggle_layer_stack(flow, True)
         return flow
 
     flow = init_actnorm(flow, next(chain))

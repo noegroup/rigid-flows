@@ -115,20 +115,21 @@ class LayerStacked(eqx.Module):
     layers: eqx.Module
 
     def __init__(self, layers: list[eqx.Module]):
-        # params, static = eqx.partition(layers, eqx.is_array)
-        self.layers = jax.tree_map(
+        params, static = eqx.partition(layers, eqx.is_array)  # type: ignore
+        params = jax.tree_map(
             lambda *args: jnp.stack(args),
-            *layers,
+            *params,
             is_leaf=lambda x: isinstance(x, jnp.ndarray),
         )
+        self.layers = eqx.combine(params, static[0])  # type: ignore
 
     def __call__(self, x):
 
-        params, static = eqx.partition(self.layers, eqx.is_array)
+        params, static = eqx.partition(self.layers, eqx.is_array)  # type: ignore
 
         def body(x, param):
             fn = eqx.combine(param, static)
-            y = fn(x)
+            y = fn(x)  # type: ignore
             return y, None
 
         y, _ = jax.lax.scan(body, x, params)
@@ -184,8 +185,8 @@ class MLPMixer(eqx.Module):
 
     encoder: eqx.nn.Linear
     decoder: eqx.nn.Linear
-    # mixers: LayerStacked
-    mixers: list[MLPMixerLayer]
+    mixers: LayerStacked
+    # mixers: list[MLPMixerLayer]
     norm: eqx.nn.LayerNorm
 
     def __init__(
@@ -202,25 +203,25 @@ class MLPMixer(eqx.Module):
     ):
         chain = key_chain(key)
         self.encoder = eqx.nn.Linear(num_inp, num_hidden, key=next(chain))
-        # self.mixers = LayerStacked(
-        #     [
-        #         MLPMixerLayer(seq_len, num_hidden, 2, key=next(chain))
-        #         for _ in range(num_blocks)
-        #     ]
-        # )
-        self.mixers = [
-            MLPMixerLayer(seq_len, num_hidden, 2, key=next(chain))
-            for _ in range(num_blocks)
-        ]
+        self.mixers = LayerStacked(
+            [
+                MLPMixerLayer(seq_len, num_hidden, 2, key=next(chain))
+                for _ in range(num_blocks)
+            ]
+        )
+        # self.mixers = [
+        #     MLPMixerLayer(seq_len, num_hidden, 2, key=next(chain))
+        #     for _ in range(num_blocks)
+        # ]
 
         self.decoder = eqx.nn.Linear(num_hidden, num_out, key=next(chain))
         self.norm = eqx.nn.LayerNorm(num_hidden, elementwise_affine=True)
 
     def __call__(self, input):
         hidden = jax.vmap(self.encoder)(input)
-        # hidden = self.mixers(hidden)
-        for mixer in self.mixers:
-            hidden = mixer(hidden)
+        hidden = self.mixers(hidden)
+        # for mixer in self.mixers:
+        #     hidden = mixer(hidden)
         hidden = self.norm(hidden)
         out = jax.vmap(self.decoder)(hidden)
         return out

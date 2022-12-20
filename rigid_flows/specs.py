@@ -23,7 +23,7 @@ class PosEncoderSpecification:
     seq_len: int
     activation: str
     num_pos: int
-    num_hidden: int
+    expansion_factor: int
     num_blocks: int
 
 
@@ -33,7 +33,7 @@ class PosAndAuxUpdateSpecification:
     activation: str
     num_dims: int
     num_pos: int
-    num_hidden: int
+    expansion_factor: int
     num_blocks: int
     transform: str
     num_low_rank: int
@@ -44,7 +44,7 @@ class PosAndAuxUpdateSpecification:
 class QuatUpdateSpecification:
     seq_len: int
     activation: str
-    num_hidden: int
+    expansion_factor: int
     num_blocks: int
 
 

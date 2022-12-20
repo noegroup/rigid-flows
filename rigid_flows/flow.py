@@ -14,22 +14,13 @@ from jaxtyping import Float
 from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.impl import Affine
-from flox.flow import (
-    DoubleMoebius,
-    Pipe,
-    Transform,
-    Transformed,
-    VectorizedTransform,
-)
+from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
-from .nn import MLPMixer, QuatEncoder
-from .specs import (
-    CouplingSpecification,
-    FlowSpecification,
-    PreprocessingSpecification,
-)
+from .lowrank import LowRankFlow
+from .nn import MLPMixer, QuatEncoder, QuatEncoderSquare
+from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -438,7 +429,7 @@ class QuatUpdate(eqx.Module):
 class AuxUpdate(eqx.Module):
     """Flow layer updating the auxiliary part of a state"""
 
-    symmetrizer: QuatEncoder
+    symmetrizer: QuatEncoderSquare
     net: MLPMixer  # | eqx.nn.Sequential | Conv
     auxiliary_shape: tuple[int, ...]
     num_low_rank: int
@@ -470,16 +461,16 @@ class AuxUpdate(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         chain = key_chain(key)
-        self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
+        self.symmetrizer = QuatEncoderSquare(32, num_dims, key=next(chain))
         self.auxiliary_shape = auxiliary_shape
         self.num_low_rank = num_low_rank
         self.low_rank_regularizer = low_rank_regularizer
         self.transform = transform
+        num_out = (2 + 2 * num_low_rank) * auxiliary_shape[-1]
         self.net = MLPMixer(
             num_inp=num_dims + num_pos,
-            num_out=2 * auxiliary_shape[-1],
+            num_out=num_out,
             key=next(chain),
-            reduce_output=False,
             **kwargs,
         )
         self.seq_len = kwargs["seq_len"]
@@ -497,29 +488,36 @@ class AuxUpdate(eqx.Module):
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
         out = self.net(feats).reshape(input.aux.shape[0], -1)
 
-        shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
+        shift_and_scale, low_rank = jnp.split(out, [2 * input.aux.shape[-1]], axis=-1)  # type: ignore
+        shift, scale = jnp.split(shift_and_scale, 2, axis=-1)  # type: ignore
+        shift = shift.reshape(input.aux.shape)
         scale = scale.reshape(input.aux.shape) * 1e-1
-        return shift, scale
+        u, v = jnp.split(low_rank, 2, axis=-1)  # type: ignore
+        u = u.reshape(self.num_low_rank, -1) 
+        v = v.reshape(self.num_low_rank, -1) 
+        return shift, scale, u, v
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        shift, scale = self.params(input)
-        pipe = Pipe(
-            [
-                Affine(shift, scale),
-            ]
-        )
+        shift, scale, u, v = self.params(input)
+        blocks = [Affine(shift, scale)]
+        if self.num_low_rank > 0:
+            assert u is not None
+            assert v is not None
+            blocks += [LowRankFlow(u, v, self.low_rank_regularizer)]
+        pipe = Pipe(blocks)
         aux, ldj = unpack(pipe.forward(input.aux))
         return Transformed(lenses.bind(input).aux.set(aux), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        shift, scale = self.params(input)
-        pipe = Pipe(
-            [
-                Affine(shift, scale),
-            ]
-        )
+        shift, scale, u, v = self.params(input)
+        blocks = [Affine(shift, scale)]
+        if self.num_low_rank > 0:
+            assert u is not None
+            assert v is not None
+            blocks += [LowRankFlow(u, v, self.low_rank_regularizer)]
+        pipe = Pipe(blocks)
         aux, ldj = unpack(pipe.inverse(input.aux))
         return Transformed(lenses.bind(input).aux.set(aux), ldj)
 
@@ -527,7 +525,7 @@ class AuxUpdate(eqx.Module):
 class PosUpdate(eqx.Module):
     """Flow layer updating the position part of a state"""
 
-    symmetrizer: QuatEncoder
+    symmetrizer: QuatEncoderSquare
     net: MLPMixer
     # net: Conv
     num_low_rank: int
@@ -561,11 +559,12 @@ class PosUpdate(eqx.Module):
         """
         self.num_low_rank = num_low_rank
         chain = key_chain(key)
-        self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
+        self.symmetrizer = QuatEncoderSquare(32, num_dims, key=next(chain))
+
+        num_out = (2 + 2 * num_low_rank) * num_pos
         self.net = MLPMixer(
             num_inp=num_dims + auxiliary_shape[-1],
-            # num_out=(2 + 2 * num_low_rank) * num_pos,
-            num_out=2 * num_pos,
+            num_out=num_out,
             key=next(chain),
             **kwargs,
         )
@@ -589,30 +588,36 @@ class PosUpdate(eqx.Module):
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
         out = self.net(feats).reshape(input.pos.shape[0], -1)
 
-        shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
+        shift_and_scale, low_rank = jnp.split(out, [2 * input.pos.shape[-1]], axis=-1)  # type: ignore
+        shift, scale = jnp.split(shift_and_scale, 2, axis=-1)  # type: ignore
         shift = shift.reshape(input.pos.shape)
         scale = scale.reshape(input.pos.shape) * 1e-1
-        return shift, scale
+        u, v = jnp.split(low_rank, 2, axis=-1)  # type: ignore
+        u = u.reshape(self.num_low_rank, -1)
+        v = v.reshape(self.num_low_rank, -1)
+        return shift, scale, u, v
 
     def forward(self, input: State) -> Transformed[State]:
         """Forward transform"""
-        shift, scale = self.params(input)
-        pipe = Pipe(
-            [
-                Affine(shift, scale),
-            ]
-        )
+        shift, scale, u, v = self.params(input)
+        blocks = [Affine(shift, scale)]
+        if self.num_low_rank > 0:
+            assert u is not None
+            assert v is not None
+            blocks += [LowRankFlow(u, v, self.low_rank_regularizer)]
+        pipe = Pipe(blocks)
         pos, ldj = unpack(pipe.forward(input.pos))
         return Transformed(lenses.bind(input).pos.set(pos), ldj)
 
     def inverse(self, input: State) -> Transformed[State]:
         """Inverse transform"""
-        shift, scale = self.params(input)
-        pipe = Pipe(
-            [
-                Affine(shift, scale),
-            ]
-        )
+        shift, scale, u, v = self.params(input)
+        blocks = [Affine(shift, scale)]
+        if self.num_low_rank > 0:
+            assert u is not None
+            assert v is not None
+            blocks += [LowRankFlow(u, v, self.low_rank_regularizer)]
+        pipe = Pipe(blocks)
         pos, ldj = unpack(pipe.inverse(input.pos))
         return Transformed(lenses.bind(input).pos.set(pos), ldj)
 

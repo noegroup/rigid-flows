@@ -33,50 +33,50 @@ model:
       act_norm: true
       auxiliary_update:
         seq_len: 16
-        activation: silu
+        activation: gelu
         num_pos: 3
         num_dims: 64
-        num_hidden: 64
-        num_blocks: 3
-        num_low_rank: 10
+        expansion_factor: 2
+        num_blocks: 2
+        num_low_rank: 2
         low_rank_regularizer: 0.
         transform: gated
       position_encoder:
         seq_len: 16
-        activation: silu
+        activation: gelu
         num_dims: 64
         num_pos: 3
-        num_hidden: 64
-        num_blocks: 3
+        expansion_factor: 2
+        num_blocks: 2
 
     # coupling layers
     couplings:
       - num_repetitions: 1
         auxiliary_update:
           seq_len: 16
-          activation: silu
+          activation: gelu
           num_pos: 3
           num_dims: 64
-          num_hidden: 64
-          num_blocks: 3
-          num_low_rank: 10
+          expansion_factor: 2
+          num_blocks: 2
+          num_low_rank: 2
           low_rank_regularizer: 0.
           transform: gated
         position_update:
           seq_len: 16
-          activation: silu
+          activation: gelu
           num_pos: 3
           num_dims: 64
-          num_hidden: 64
-          num_blocks: 3
-          num_low_rank: 10
+          expansion_factor: 2
+          num_blocks: 2
+          num_low_rank: 2
           low_rank_regularizer: 0.
           transform: gated
         quaternion_update:
           seq_len: 16
-          activation: silu
-          num_hidden: 64
-          num_blocks: 3
+          activation: gelu
+          expansion_factor: 2
+          num_blocks: 2
         act_norm: true
 
   # base density
@@ -96,7 +96,7 @@ system:
   temperature: 250
   ice_type: XI
   water_type: tip4pew-customLJ
-  recompute_forces: true
+  recompute_forces: false
   store_forces: false
   forces_path: null
   fixed_box: true
@@ -115,7 +115,7 @@ train:
     init_learning_rate: 1e-3
     target_learning_rate: 1e-3
     weight_nll: 1.0
-    weight_fm: 0.01
+    weight_fm: 0.
     weight_fe: 0
     weight_vg_model: 0
     weight_vg_target: 0

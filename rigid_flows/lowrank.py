@@ -1,3 +1,5 @@
+from math import prod, sqrt
+
 import jax
 import jax.numpy as jnp
 from jax import Array, float0
@@ -94,7 +96,9 @@ class LowRankFlow:
         input = input.reshape(-1)
 
         us = self.us.reshape(-1, input.shape[-1])
+        us = us / sqrt(prod(us.shape))
         vs = self.vs.reshape(-1, input.shape[-1])
+        vs = us / sqrt(prod(us.shape))
 
         vs, us_inv, vs_inv, ldj = invert_uv_stable(us, vs, self.regularizer)
 
@@ -108,7 +112,9 @@ class LowRankFlow:
         input = input.reshape(-1)
 
         us = self.us.reshape(-1, input.shape[-1])
+        us = us / sqrt(prod(us.shape))
         vs = self.vs.reshape(-1, input.shape[-1])
+        vs = us / sqrt(prod(us.shape))
 
         vs, us_inv, vs_inv, ldj = invert_uv_stable(us, vs, self.regularizer)
         us, vs, us_inv, vs_inv = us_inv, vs_inv, us, vs

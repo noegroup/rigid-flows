@@ -97,7 +97,8 @@ class TrainingSpecification:
     init_learning_rate: float
     target_learning_rate: float
     weight_nll: float
-    weight_fm: float
+    weight_fm_model: float
+    weight_fm_target: float
     weight_fe: float
     weight_vg_model: float
     weight_vg_target: float

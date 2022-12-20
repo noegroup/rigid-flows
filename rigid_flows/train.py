@@ -9,7 +9,12 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
+from optax import (
+    GradientTransformation,
+    OptState,
+    huber_loss,
+    safe_root_mean_squares,
+)
 from tqdm import tqdm
 
 from flox.flow import PullbackSampler, Transform
@@ -91,7 +96,8 @@ def per_sample_loss(
     target: DensityModel,
     flow: Transform[AugmentedData, State],
     weight_nll: float,
-    weight_fm: float,
+    weight_fm_target: float,
+    weight_fm_model: float,
     weight_fe: float,
     weight_vg_target: float,
     weight_vg_model: float,
@@ -108,12 +114,18 @@ def per_sample_loss(
         nll_loss = negative_log_likelihood(inp, base, flow)
         losses["nll"] = nll_loss
         total_loss += weight_nll * nll_loss
-    if weight_fm > 0:
+    if weight_fm_target > 0:
         assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
         fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
-        losses["fm"] = fm_loss
-        total_loss += weight_fm * fm_loss
+        losses["fm_target"] = fm_loss
+        total_loss += weight_fm_target * fm_loss
+    if weight_fm_model > 0:
+        assert fm_aggregation is not None
+        inp, _ = unpack(target.sample(next(chain)))
+        fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
+        losses["fm_model"] = fm_loss
+        total_loss += weight_fm_target * fm_loss
 
     if weight_fe > 0:
         inp, _ = unpack(base.sample(next(chain)))
@@ -135,7 +147,8 @@ def batch_loss(
     target: DensityModel,
     flow: Transform[AugmentedData, State],
     weight_nll: float,
-    weight_fm: float,
+    weight_fm_target: float,
+    weight_fm_model: float,
     weight_fe: float,
     weight_vg_model: float,
     weight_vg_target: float,
@@ -149,7 +162,8 @@ def batch_loss(
             target=target,
             flow=flow,
             weight_nll=weight_nll,
-            weight_fm=weight_fm,
+            weight_fm_target=weight_fm_target,
+            weight_fm_model=weight_fm_model,
             weight_fe=weight_fe,
             weight_vg_model=weight_vg_model,
             weight_vg_target=weight_vg_target,
@@ -278,19 +292,12 @@ def run_training_stage(
 
     opt_state = trainer.init(next(chain), flow)
 
-    
-    
-    
-
-    
-
-
     with jit_and_cleanup_cache(trainer.step) as step:
         for num_epoch in range(training_specs.num_epochs):
             target.model.set_softcore_cutoff(
                 system_specs.softcore_cutoff,
                 system_specs.softcore_potential,
-                system_specs.softcore_slope
+                system_specs.softcore_slope,
             )
 
             epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
@@ -316,5 +323,6 @@ def run_training_stage(
                 tot_iter += 1
 
             target.model.set_softcore_cutoff(None)
+
             epoch_reporter.report_model(next(chain), flow, tot_iter)
     return flow

@@ -19,7 +19,7 @@ from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .lowrank import LowRankFlow
-from .nn import MLPMixer, QuatEncoder, QuatEncoderSquare
+from .nn import MLPMixer, QuatEncoder
 from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
 from .system import SimulationBox
 
@@ -429,7 +429,7 @@ class QuatUpdate(eqx.Module):
 class AuxUpdate(eqx.Module):
     """Flow layer updating the auxiliary part of a state"""
 
-    symmetrizer: QuatEncoderSquare
+    symmetrizer: QuatEncoder
     net: MLPMixer  # | eqx.nn.Sequential | Conv
     auxiliary_shape: tuple[int, ...]
     num_low_rank: int
@@ -461,7 +461,7 @@ class AuxUpdate(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         chain = key_chain(key)
-        self.symmetrizer = QuatEncoderSquare(32, num_dims, key=next(chain))
+        self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
         self.auxiliary_shape = auxiliary_shape
         self.num_low_rank = num_low_rank
         self.low_rank_regularizer = low_rank_regularizer
@@ -525,7 +525,7 @@ class AuxUpdate(eqx.Module):
 class PosUpdate(eqx.Module):
     """Flow layer updating the position part of a state"""
 
-    symmetrizer: QuatEncoderSquare
+    symmetrizer: QuatEncoder
     net: MLPMixer
     # net: Conv
     num_low_rank: int
@@ -559,7 +559,7 @@ class PosUpdate(eqx.Module):
         """
         self.num_low_rank = num_low_rank
         chain = key_chain(key)
-        self.symmetrizer = QuatEncoderSquare(32, num_dims, key=next(chain))
+        self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
 
         num_out = (2 + 2 * num_low_rank) * num_pos
         self.net = MLPMixer(

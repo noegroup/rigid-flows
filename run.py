@@ -139,7 +139,7 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--specs", type=str, required=True)
     parser.add_argument("--run_dir", type=str, required=True)
-    parser.add_argument("--label", type=str, required=False)
+    parser.add_argument("--label", type=str, required=False, default="")
     args = parser.parse_args()
 
     writer, local_run_dir = setup_tensorboard(args.run_dir, args.label)

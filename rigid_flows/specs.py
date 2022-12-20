@@ -119,6 +119,11 @@ class SystemSpecification:
     store_forces: bool
     forces_path: str | None
     fixed_box: bool
+
+    softcore_cutoff: float
+    softcore_potential: str
+    softcore_slope: float
+
     water_type: str = "tip4pew"
 
     def __str__(self) -> str:

@@ -340,6 +340,11 @@ class TargetDensity(DensityModel[AugmentedData]):
         data = Data.from_specs(sys_specs)
         prior = PositionPrior(data)
         model = OpenMMEnergyModel.from_specs(sys_specs)
+        model.set_softcore_cutoff(
+            sys_specs.softcore_cutoff,
+            sys_specs.softcore_potential,
+            sys_specs.softcore_slope,
+        )
         if sys_specs.recompute_forces:
             data = data.recompute_forces(model)
         elif sys_specs.forces_path:

@@ -19,7 +19,7 @@ from .data import AugmentedData
 from .density import BaseDensity, DensityModel, TargetDensity
 from .flow import State
 from .reporting import Reporter
-from .specs import TrainingSpecification
+from .specs import SystemSpecification, TrainingSpecification
 from .utils import jit_and_cleanup_cache
 
 KeyArray = Array | jax.random.PRNGKeyArray
@@ -267,6 +267,7 @@ def run_training_stage(
     target: TargetDensity,
     flow: Flow,
     training_specs: TrainingSpecification,
+    system_specs: SystemSpecification,
     reporter: Reporter,
     tot_iter: int,
 ):
@@ -277,8 +278,21 @@ def run_training_stage(
 
     opt_state = trainer.init(next(chain), flow)
 
+    
+    
+    
+
+    
+
+
     with jit_and_cleanup_cache(trainer.step) as step:
         for num_epoch in range(training_specs.num_epochs):
+            target.model.set_softcore_cutoff(
+                system_specs.softcore_cutoff,
+                system_specs.softcore_potential,
+                system_specs.softcore_slope
+            )
+
             epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
             pbar = tqdm(
                 range(training_specs.num_iters_per_epoch),
@@ -300,5 +314,7 @@ def run_training_stage(
                     tot_iter,
                 )
                 tot_iter += 1
+
+            target.model.set_softcore_cutoff(None)
             epoch_reporter.report_model(next(chain), flow, tot_iter)
     return flow

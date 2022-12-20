@@ -209,19 +209,12 @@ class MLPMixer(eqx.Module):
                 for _ in range(num_blocks)
             ]
         )
-        # self.mixers = [
-        #     MLPMixerLayer(seq_len, num_hidden, 2, key=next(chain))
-        #     for _ in range(num_blocks)
-        # ]
-
         self.decoder = eqx.nn.Linear(num_hidden, num_out, key=next(chain))
         self.norm = eqx.nn.LayerNorm(num_hidden, elementwise_affine=True)
 
     def __call__(self, input):
         hidden = jax.vmap(self.encoder)(input)
         hidden = self.mixers(hidden)
-        # for mixer in self.mixers:
-        #     hidden = mixer(hidden)
         hidden = self.norm(hidden)
         out = jax.vmap(self.decoder)(hidden)
         return out

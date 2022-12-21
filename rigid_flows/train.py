@@ -214,7 +214,8 @@ class Trainer:
     base: DensityModel
     target: DensityModel
     weight_nll: float
-    weight_fm: float
+    weight_fm_target: float
+    weight_fm_model: float
     weight_fe: float
     weight_vg_model: float
     weight_vg_target: float
@@ -245,7 +246,8 @@ class Trainer:
                 target=self.target,
                 num_samples=self.num_samples,
                 weight_nll=self.weight_nll,
-                weight_fm=self.weight_fm,
+                weight_fm_model=self.weight_fm_model,
+                weight_fm_target=self.weight_fm_target,
                 weight_fe=self.weight_fe,
                 weight_vg_model=self.weight_vg_model,
                 weight_vg_target=self.weight_vg_target,
@@ -266,7 +268,8 @@ class Trainer:
             base,
             target,
             specs.weight_nll,
-            specs.weight_fm,
+            specs.weight_fm_model,
+            specs.weight_fm_target,
             specs.weight_fe,
             specs.weight_vg_model,
             specs.weight_vg_target,

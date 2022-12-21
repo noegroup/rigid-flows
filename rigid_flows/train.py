@@ -7,7 +7,7 @@ import jax
 import lenses
 import optax
 import tensorflow as tf  # type: ignore
-from jax import Array
+from jax import Array, jvp
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 from optax import (
@@ -126,9 +126,15 @@ def per_sample_loss(
         assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
         if inp.force is None:
-            _, force = jax.grad(
-                lambda pos: target.potential(lenses.bind(inp).pos.set(pos))
-            )(inp.pos)
+
+            def compute_force(pos):
+                out, vjp = jax.vjp(
+                    lambda pos: target.potential(lenses.bind(inp).pos.set(pos)),
+                    pos,
+                )
+                return vjp(jnp.ones_like(out))
+
+            _, force = compute_force(inp.pos)
             inp = lenses.bind(inp).force.set(force)
         inp = jax.lax.stop_gradient(inp)
 
@@ -138,9 +144,15 @@ def per_sample_loss(
     if weight_fm_model > 0:
         assert fm_aggregation is not None
         inp, _ = unpack(PullbackSampler(base.sample, flow)(next(chain)))
-        _, force = jax.grad(
-            lambda pos: target.potential(lenses.bind(inp).pos.set(pos))
-        )(inp.pos)
+
+        def compute_force(pos):
+            out, vjp = jax.vjp(
+                lambda pos: target.potential(lenses.bind(inp).pos.set(pos)),
+                pos,
+            )
+            return vjp(jnp.ones_like(out))
+
+        _, force = compute_force(inp.pos)
         inp = lenses.bind(inp).force.set(force)
         inp = jax.lax.stop_gradient(inp)
 

@@ -232,11 +232,12 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
         return energy, -g * force
 
     @partial(jax.custom_vjp, nondiff_argnums=(1, 2))
-    @jax.custom_jvp
     def eval(pos: Array, box: Array | None, has_batch_dim: bool):
         return eval_fwd(pos, box, has_batch_dim)[0]
 
     eval.defvjp(eval_fwd, eval_bwd)
+
+    eval = jax.custom_jvp(eval)
     eval.defjvp(eval_jvp)
 
     return eval

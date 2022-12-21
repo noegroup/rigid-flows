@@ -18,7 +18,6 @@ from optax import (
 )
 from tqdm import tqdm
 
-from experiments.rigid_flows.rigid_flows.system import wrap_openmm_model
 from flox.flow import PullbackSampler, Transform
 from flox.util import key_chain, unpack
 
@@ -27,6 +26,7 @@ from .density import BaseDensity, DensityModel, TargetDensity
 from .flow import State
 from .reporting import Reporter
 from .specs import SystemSpecification, TrainingSpecification
+from .system import wrap_openmm_model
 from .utils import jit_and_cleanup_cache
 
 KeyArray = Array | jax.random.PRNGKeyArray

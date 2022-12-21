@@ -9,12 +9,7 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import (
-    GradientTransformation,
-    OptState,
-    huber_loss,
-    safe_root_mean_squares,
-)
+from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
 from tqdm import tqdm
 
 from flox.flow import PullbackSampler, Transform
@@ -114,30 +109,36 @@ def per_sample_loss(
         nll_loss = negative_log_likelihood(inp, base, flow)
         losses["nll"] = nll_loss
         total_loss += weight_nll * nll_loss
-    if weight_fm_target > 0:
-        assert fm_aggregation is not None
-        inp, _ = unpack(target.sample(next(chain)))
-        fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
-        losses["fm_target"] = fm_loss
-        total_loss += weight_fm_target * fm_loss
-    if weight_fm_model > 0:
-        assert fm_aggregation is not None
-        inp, _ = unpack(target.sample(next(chain)))
-        fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
-        losses["fm_model"] = fm_loss
-        total_loss += weight_fm_target * fm_loss
 
     if weight_fe > 0:
         inp, _ = unpack(base.sample(next(chain)))
         kl_loss = free_energy_loss(inp, target, flow)
         losses["kl"] = kl_loss
         total_loss += weight_fe * kl_loss
+
+    if weight_fm_target > 0:
+        assert fm_aggregation is not None
+        inp, _ = unpack(target.sample(next(chain)))
+        inp = jax.lax.stop_gradient(inp)
+        fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
+        losses["fm_target"] = fm_loss
+        total_loss += weight_fm_target * fm_loss
+    if weight_fm_model > 0:
+        assert fm_aggregation is not None
+        inp, _ = unpack(PullbackSampler(base.sample, flow)(next(chain)))
+        inp = jax.lax.stop_gradient(inp)
+        fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
+        losses["fm_model"] = fm_loss
+        total_loss += weight_fm_model * fm_loss
+
     if weight_vg_target > 0:
         inp, _ = unpack(target.sample(next(chain)))
         var_grad_losses["target"] = energy_difference(inp, base, target, flow)
     if weight_vg_model > 0:
         inp, _ = unpack(PullbackSampler(base.sample, flow)(next(chain)))
+        inp = jax.lax.stop_gradient(inp)
         var_grad_losses["model"] = energy_difference(inp, base, target, flow)
+
     return total_loss, losses, var_grad_losses
 
 

@@ -18,6 +18,7 @@ from optax import (
 )
 from tqdm import tqdm
 
+from experiments.rigid_flows.rigid_flows.system import wrap_openmm_model
 from flox.flow import PullbackSampler, Transform
 from flox.util import key_chain, unpack
 
@@ -126,15 +127,8 @@ def per_sample_loss(
         assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
         if inp.force is None:
-
-            def compute_force(pos):
-                out, vjp = jax.vjp(
-                    lambda pos: target.potential(lenses.bind(inp).pos.set(pos)),
-                    pos,
-                )
-                return vjp(jnp.ones_like(out))
-
-            _, force = compute_force(inp.pos)
+            compute_energy_and_force = wrap_openmm_model(target.model)[1]
+            _, force = compute_energy_and_force(inp.pos, None, False)
             inp = lenses.bind(inp).force.set(force)
         inp = jax.lax.stop_gradient(inp)
 
@@ -145,14 +139,8 @@ def per_sample_loss(
         assert fm_aggregation is not None
         inp, _ = unpack(PullbackSampler(base.sample, flow)(next(chain)))
 
-        def compute_force(pos):
-            out, vjp = jax.vjp(
-                lambda pos: target.potential(lenses.bind(inp).pos.set(pos)),
-                pos,
-            )
-            return vjp(jnp.ones_like(out))
-
-        _, force = compute_force(inp.pos)
+        compute_energy_and_force = wrap_openmm_model(target.model)[1]
+        _, force = compute_energy_and_force(inp.pos, None, False)
         inp = lenses.bind(inp).force.set(force)
         inp = jax.lax.stop_gradient(inp)
 
@@ -185,6 +173,7 @@ def batch_loss(
     fm_aggregation: str | None,
     num_samples: int,
 ):
+
     total_loss, losses, var_grad_losses = jax.vmap(
         partial(
             per_sample_loss,
@@ -201,6 +190,7 @@ def batch_loss(
         ),
         axis_name="batch",
     )(jax.random.split(key, num_samples))
+
     losses = jax.tree_map(jnp.mean, losses)
     total_loss_agg = jnp.mean(total_loss)
 

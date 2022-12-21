@@ -264,7 +264,7 @@ class TargetDensity(DensityModel[AugmentedData]):
             box = inp.box.size
 
         energy = partial(
-            wrap_openmm_model(self.model),
+            wrap_openmm_model(self.model)[0],
             box=box,
             has_batch_dim=False,
         )

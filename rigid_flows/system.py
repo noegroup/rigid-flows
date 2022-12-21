@@ -225,14 +225,13 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
         force = res
         return (-g * force,)
 
-
     @partial(jax.custom_vjp, nondiff_argnums=(1, 2))
     def eval(pos: Array, box: Array | None, has_batch_dim: bool):
         return eval_fwd(pos, box, has_batch_dim)[0]
 
     eval.defvjp(eval_fwd, eval_bwd)
 
-    return eval
+    return eval, compute_energy_and_forces
 
 
 def lennard_jones(r, sigma, epsilon):

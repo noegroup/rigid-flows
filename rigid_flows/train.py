@@ -4,6 +4,7 @@ from typing import cast
 
 import equinox as eqx
 import jax
+import lenses
 import optax
 import tensorflow as tf  # type: ignore
 from jax import Array
@@ -93,7 +94,7 @@ def energy_difference(
 def per_sample_loss(
     key: KeyArray,
     base: DensityModel,
-    target: DensityModel,
+    target: TargetDensity,
     flow: Transform[AugmentedData, State],
     weight_nll: float,
     weight_fm_target: float,
@@ -125,13 +126,19 @@ def per_sample_loss(
         assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
         inp = jax.lax.stop_gradient(inp)
+        if inp.force is None:
+            _, force = target.model.compute_energies_and_forces(inp.pos, None)
+            inp = lenses.bind(inp).force.set(force)
         fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
         losses["fm_target"] = fm_loss
         total_loss += weight_fm_target * fm_loss
     if weight_fm_model > 0:
         assert fm_aggregation is not None
         inp, _ = unpack(PullbackSampler(base.sample, flow)(next(chain)))
+
         inp = jax.lax.stop_gradient(inp)
+        _, force = target.model.compute_energies_and_forces(inp.pos, None)
+        inp = lenses.bind(inp).force.set(force)
         fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
         losses["fm_model"] = fm_loss
         total_loss += weight_fm_model * fm_loss
@@ -150,7 +157,7 @@ def per_sample_loss(
 def batch_loss(
     key: KeyArray,
     base: DensityModel,
-    target: DensityModel,
+    target: TargetDensity,
     flow: Transform[AugmentedData, State],
     weight_nll: float,
     weight_fm_target: float,
@@ -218,7 +225,7 @@ def get_scheduler(specs: TrainingSpecification):
 class Trainer:
     optim: GradientTransformation
     base: DensityModel
-    target: DensityModel
+    target: TargetDensity
     weight_nll: float
     weight_fm_target: float
     weight_fm_model: float
@@ -267,7 +274,7 @@ class Trainer:
 
     @staticmethod
     def from_specs(
-        base: DensityModel, target: DensityModel, specs: TrainingSpecification
+        base: DensityModel, target: TargetDensity, specs: TrainingSpecification
     ):
         optim = optax.adam(get_scheduler(specs))
         optim = optax.apply_if_finite(optim, 10)

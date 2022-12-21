@@ -121,3 +121,5 @@ train:
     weight_vg_target: 0
     fm_aggregation: rmse
     num_samples: 128
+    use_grad_clipping: true
+    grad_clipping_ratio: 2.

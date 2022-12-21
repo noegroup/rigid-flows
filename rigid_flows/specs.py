@@ -104,6 +104,8 @@ class TrainingSpecification:
     weight_vg_target: float
     fm_aggregation: str | None
     num_samples: int
+    use_grad_clipping: bool
+    grad_clipping_ratio: float
 
     @property
     def num_iterations(self):

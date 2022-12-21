@@ -9,7 +9,12 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
+from optax import (
+    GradientTransformation,
+    OptState,
+    huber_loss,
+    safe_root_mean_squares,
+)
 from tqdm import tqdm
 
 from flox.flow import PullbackSampler, Transform
@@ -264,8 +269,12 @@ class Trainer:
     def from_specs(
         base: DensityModel, target: DensityModel, specs: TrainingSpecification
     ):
+        optim = optax.adam(get_scheduler(specs))
+        optim = optax.apply_if_finite(optim, 10)
+        if specs.use_grad_clipping:
+            optim = optax.adaptive_grad_clip(specs.grad_clipping_ratio)
         return Trainer(
-            optax.adam(get_scheduler(specs)),
+            optim,
             base,
             target,
             specs.weight_nll,

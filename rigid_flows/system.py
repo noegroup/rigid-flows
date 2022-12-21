@@ -225,11 +225,19 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
         force = res
         return (-g * force,)
 
+    def eval_jvp(primals, tangents):
+        pos, box, has_batch_dim = primals
+        g = tangents
+        energy, force = compute_energy_and_forces(pos, box, has_batch_dim)
+        return energy, -g * force
+
     @partial(jax.custom_vjp, nondiff_argnums=(1, 2))
+    @jax.custom_jvp
     def eval(pos: Array, box: Array | None, has_batch_dim: bool):
         return eval_fwd(pos, box, has_batch_dim)[0]
 
     eval.defvjp(eval_fwd, eval_bwd)
+    eval.defjvp(eval_jvp)
 
     return eval
 

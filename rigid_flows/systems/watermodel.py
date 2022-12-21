@@ -51,7 +51,8 @@ class WaterModel:
         topology.setPeriodicBoxVectors(box)
 
         if nonbondedCutoff > np.diagonal(box).min() / 2:
-            nonbondedCutoff = np.diagonal(box).min() / 2
+            epsilon = 1e-5
+            nonbondedCutoff = np.diagonal(box).min() / 2 - epsilon
             print(
                 f"+++ WARNING: `nonbondedCutoff` too large, changed to {nonbondedCutoff} +++",
                 file=stderr,

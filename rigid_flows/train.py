@@ -125,23 +125,25 @@ def per_sample_loss(
     if weight_fm_target > 0:
         assert fm_aggregation is not None
         inp, _ = unpack(target.sample(next(chain)))
-        inp = jax.lax.stop_gradient(inp)
         if inp.force is None:
             _, force = jax.grad(
                 lambda pos: target.potential(lenses.bind(inp).pos.set(pos))
             )(inp.pos)
             inp = lenses.bind(inp).force.set(force)
+        inp = jax.lax.stop_gradient(inp)
+
         fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
         losses["fm_target"] = fm_loss
         total_loss += weight_fm_target * fm_loss
     if weight_fm_model > 0:
         assert fm_aggregation is not None
         inp, _ = unpack(PullbackSampler(base.sample, flow)(next(chain)))
-
         _, force = jax.grad(
             lambda pos: target.potential(lenses.bind(inp).pos.set(pos))
         )(inp.pos)
         inp = lenses.bind(inp).force.set(force)
+        inp = jax.lax.stop_gradient(inp)
+
         fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
         losses["fm_model"] = fm_loss
         total_loss += weight_fm_model * fm_loss

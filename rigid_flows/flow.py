@@ -740,9 +740,9 @@ class InitialTransform:
         rot = rigid.rot
 
         pos, ldj0 = unpack(self.pos_prior.forward(pos))
-        rot, ldj2 = unpack(self.rot_prior.forward(rot))
+        # rot, ldj2 = unpack(self.rot_prior.forward(rot))
 
-        ldj = ldj0 + ldj1 + ldj2
+        ldj = ldj0 + ldj1
 
         state = State(rot, pos, rigid.ics, input.aux, input.box)
         return Transformed(state, ldj)
@@ -753,13 +753,13 @@ class InitialTransform:
         rot = input.rot
 
         pos, ldj0 = unpack(self.pos_prior.inverse(pos))
-        rot, ldj2 = unpack(self.rot_prior.inverse(rot))
+        # rot, ldj2 = unpack(self.rot_prior.inverse(rot))
 
         rigid = jax.vmap(RigidRepresentation)(rot, pos)
         pos, ldj1 = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))
         sign = jnp.sign(input.rot[:, (0,)])
 
-        ldj = ldj0 + ldj1 + ldj2
+        ldj = ldj0 + ldj1
 
         com = jnp.mean(pos, axis=(0, 1))
 

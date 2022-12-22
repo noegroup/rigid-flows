@@ -5,10 +5,6 @@ import shutil
 from dataclasses import asdict
 from typing import cast
 
-from jax.config import config
-
-config.update("jax_enable_x64", True)
-
 import equinox as eqx
 import git
 import jax
@@ -33,6 +29,10 @@ from rigid_flows.train import run_training_stage
 from flox._src.flow.api import Transform
 from flox.flow import Pipe
 from flox.util import key_chain
+
+# from jax.config import config
+
+# config.update("jax_enable_x64", True)
 
 
 def backup_config_file(run_dir: str, specs_path: str):

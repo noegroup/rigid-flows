@@ -91,8 +91,9 @@ class BaseDensity(DensityModel[State]):
         box: SimulationBox,
         rot_modes: Array,
         rot_concentration: Array,
-        pos_means: Array,
-        pos_stds: Array,
+        prior: PositionPrior,
+        # pos_means: Array,
+        # pos_stds: Array,
         aux_means: Array,
         aux_stds: Array,
     ):
@@ -100,8 +101,8 @@ class BaseDensity(DensityModel[State]):
         self.rot_model = tfp.distributions.VonMisesFisher(
             rot_modes, rot_concentration
         )
-        self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
-        # self.pos_model = prior
+        # self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        self.pos_model = prior
         # self.pos_model = tfp.distributions.VonMisesFisher(
         #     pos_modes, pos_concentration
         # )
@@ -172,13 +173,14 @@ class BaseDensity(DensityModel[State]):
             ),
             rot_concentration=base_specs.rot_concentration
             * jnp.ones((system_specs.num_molecules,)),
-            pos_means=jnp.zeros(
-                (
-                    system_specs.num_molecules,
-                    3,
-                )
-            ),
-            pos_stds=jnp.ones((system_specs.num_molecules, 3)),
+            prior=prior,
+            # pos_means=jnp.zeros(
+            #     (
+            #         system_specs.num_molecules,
+            #         3,
+            #     )
+            # ),
+            # pos_stds=jnp.ones((system_specs.num_molecules, 3)),
             aux_means=jnp.zeros(auxiliary_shape),
             aux_stds=jnp.ones(auxiliary_shape),
         )
@@ -316,9 +318,9 @@ class TargetDensity(DensityModel[AugmentedData]):
 
             if self.data.force is not None:
                 force = self.data.force[idx]
-                force += jax.grad(lambda x: self.com_model.log_prob(x).sum())(
-                    com
-                )
+                # force += jax.grad(lambda x: self.com_model.log_prob(x).sum())(
+                #     com
+                # )
             else:
                 force = None
 

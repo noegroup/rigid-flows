@@ -14,13 +14,23 @@ from jaxtyping import Float
 from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.impl import Affine
-from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
+from flox.flow import (
+    DoubleMoebius,
+    Pipe,
+    Transform,
+    Transformed,
+    VectorizedTransform,
+)
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .lowrank import LowRankFlow
 from .nn import MLPMixer, QuatEncoder
-from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
+from .specs import (
+    CouplingSpecification,
+    FlowSpecification,
+    PreprocessingSpecification,
+)
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -370,7 +380,7 @@ class QuatUpdate(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         self.net = MLPMixer(
-            num_inp=auxiliary_shape[-1] + num_pos, # * 2,
+            num_inp=auxiliary_shape[-1] + num_pos,  # * 2,
             num_out=4 * 4 + 4,  # num_rot,
             key=key,
             **kwargs,
@@ -386,7 +396,8 @@ class QuatUpdate(eqx.Module):
             Array: the parameter (reflection) of the double moebius transform
         """
         aux = input.aux
-        pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
+        pos = input.pos
+        # pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
         # pos = jnp.concatenate(
         #     [
         #         jnp.cos(pos),
@@ -478,7 +489,7 @@ class AuxUpdate(eqx.Module):
         self.transform = transform
         num_out = (2 + 2 * num_low_rank) * auxiliary_shape[-1]
         self.net = MLPMixer(
-            num_inp=num_dims + num_pos, # * 2,
+            num_inp=num_dims + num_pos,  # * 2,
             num_out=num_out,
             key=next(chain),
             **kwargs,
@@ -494,7 +505,8 @@ class AuxUpdate(eqx.Module):
         Returns:
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
-        pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
+        pos = input.pos
+        # pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
         # pos = jnp.concatenate(
         #     [
         #         jnp.cos(pos),
@@ -719,7 +731,8 @@ class InitialTransform:
             VectorizedTransform(RigidTransform()).forward(input.pos)
         )
         rigid = lenses.bind(rigid).rot.set(rigid.rot * input.sign)
-        pos = rigid.pos + input.com
+        # pos = rigid.pos + input.com
+        pos = rigid.pos
         state = State(rigid.rot, pos, rigid.ics, input.aux, input.box)
         return Transformed(state, ldj)
 
@@ -729,7 +742,7 @@ class InitialTransform:
         sign = jnp.sign(input.rot[:, (0,)])
 
         com = jnp.mean(pos, axis=(0, 1))
-        pos = pos - com[None, None]
+        # pos = pos - com[None, None]
         data = AugmentedData(pos, com, input.aux, sign, input.box)
         return Transformed(data, ldj)
 
@@ -773,8 +786,8 @@ def _preprocess(
     return Pipe(
         [
             InitialTransform(),
-            *aux_block,
-            *pos_block,
+            # *aux_block,
+            # *pos_block,
         ]
     )
 

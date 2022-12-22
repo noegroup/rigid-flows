@@ -6,12 +6,12 @@ global_step: 0
 act_norm_init_samples: 128
 
 reporting:
-  num_samples: 1000
-  num_samples_per_batch: 1000
+  num_samples: 1
+  num_samples_per_batch: 1
   plot_quaternions: null # [1, 5] 
-  plot_oxygens: true
-  plot_energy_histograms: true
-  report_ess: true
+  plot_oxygens: false
+  plot_energy_histograms: false
+  report_ess: false
   report_likelihood: false 
   save_model: false
   save_samples: false
@@ -37,7 +37,7 @@ model:
         num_pos: 3
         num_dims: 64
         expansion_factor: 2
-        num_blocks: 2
+        num_blocks: 1
         num_low_rank: 2
         low_rank_regularizer: 0.
         transform: gated
@@ -47,7 +47,7 @@ model:
         num_dims: 64
         num_pos: 3
         expansion_factor: 2
-        num_blocks: 2
+        num_blocks: 1
 
     # coupling layers
     couplings:
@@ -58,7 +58,7 @@ model:
           num_pos: 3
           num_dims: 64
           expansion_factor: 2
-          num_blocks: 2
+          num_blocks: 1
           num_low_rank: 2
           low_rank_regularizer: 0.
           transform: gated
@@ -68,7 +68,7 @@ model:
           num_pos: 3
           num_dims: 64
           expansion_factor: 2
-          num_blocks: 2
+          num_blocks: 1
           num_low_rank: 2
           low_rank_regularizer: 0.
           transform: gated
@@ -76,7 +76,7 @@ model:
           seq_len: 16
           activation: gelu
           expansion_factor: 2
-          num_blocks: 2
+          num_blocks: 1
         act_norm: true
 
   # base density
@@ -87,7 +87,6 @@ model:
   # target density
   target:
     cutoff_threshold: null
-
 
 # system definition
 system:
@@ -105,21 +104,30 @@ system:
   softcore_potential: "linear"
   softcore_slope: 2.
 
-
 # training definition
 train:
 
   # first stage: only likelihood
   - num_epochs: 2
     num_iters_per_epoch: 1000
+
     init_learning_rate: 1e-3
     target_learning_rate: 1e-3
+
     weight_nll: 1.0
-    weight_fm: 0.
-    weight_fe: 0
-    weight_vg_model: 0
-    weight_vg_target: 0
-    fm_aggregation: rmse
+
+    weight_fm_model: 0.
+    fm_model_perturbation_noise: 0.
+    weight_fm_target: 0.
+    fm_target_perturbation_noise: 0.
+
+    weight_fe: 0.
+    weight_vg_model: 0.
+    weight_vg_target: 0.
+  
     num_samples: 128
-    use_grad_clipping: true
+
+    use_grad_clipping: false
     grad_clipping_ratio: 2.
+
+    apply_if_finite_trials: 100

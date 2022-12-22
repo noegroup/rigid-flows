@@ -1,7 +1,6 @@
 import enum
 import inspect
 import logging
-from collections import ChainMap
 from functools import partial
 from typing import Callable
 

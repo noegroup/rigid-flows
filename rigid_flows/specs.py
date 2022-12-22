@@ -102,10 +102,12 @@ class TrainingSpecification:
     weight_fe: float
     weight_vg_model: float
     weight_vg_target: float
-    fm_aggregation: str | None
+    fm_model_perturbation_noise: float
+    fm_target_perturbation_noise: float
     num_samples: int
     use_grad_clipping: bool
     grad_clipping_ratio: float
+    apply_if_finite_trials: int
 
     @property
     def num_iterations(self):

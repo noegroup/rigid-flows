@@ -85,7 +85,7 @@ def smooth_maximum(a, bins=1000, sigma=10000, window=1000):
 class RotationPrior(eqx.Module):
     loc: Array
     scale: Array
-    vmf: tfp.distributions.VonMisesFisher
+    # vmf: tfp.distributions.VonMisesFisher
 
     def __init__(self, data: Data):
         def quat(x: Array):
@@ -107,7 +107,7 @@ class RotationPrior(eqx.Module):
 
         self.loc = jnp.stack(locs)
         self.scale = jnp.stack(scales)
-        self.vmf = tfp.distributions.VonMisesFisher(self.loc, self.scale)
+        # self.vmf = tfp.distributions.VonMisesFisher(self.loc, self.scale)
 
     def forward(self, p):
         p = jax.vmap(lambda q, p: geom.qprod(geom.qconj(q), geom.qprod(p, q)))(
@@ -121,18 +121,18 @@ class RotationPrior(eqx.Module):
         )
         return Transformed(p, jnp.zeros(()))
 
-    def sample(self, seed: KeyArray):
-        # return jax.vmap(geom.unit)(jax.random.normal(key, shape=self.loc.shape))
-        return self.vmf.sample(seed=seed)
+    # def sample(self, seed: KeyArray):
+    #     # return jax.vmap(geom.unit)(jax.random.normal(key, shape=self.loc.shape))
+    #     return self.vmf.sample(seed=seed)
 
-    def log_prob(self, x: Array):
-        parts = jnp.stack(
-            [
-                self.vmf.log_prob(x) + jnp.log(0.5),
-                self.vmf.log_prob(-x) + jnp.log(0.5),
-            ]
-        )
-        return jax.nn.logsumexp(parts)
+    # def log_prob(self, x: Array):
+    #     parts = jnp.stack(
+    #         [
+    #             self.vmf.log_prob(x) + jnp.log(0.5),
+    #             self.vmf.log_prob(-x) + jnp.log(0.5),
+    #         ]
+    #     )
+    #     return jax.nn.logsumexp(parts)
 
 
 class PositionPrior(eqx.Module):

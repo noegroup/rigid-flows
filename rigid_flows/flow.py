@@ -14,23 +14,13 @@ from jaxtyping import Float
 from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.impl import Affine
-from flox.flow import (
-    DoubleMoebius,
-    Pipe,
-    Transform,
-    Transformed,
-    VectorizedTransform,
-)
+from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .lowrank import LowRankFlow
 from .nn import MLPMixer, QuatEncoder
-from .specs import (
-    CouplingSpecification,
-    FlowSpecification,
-    PreprocessingSpecification,
-)
+from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -64,6 +54,8 @@ class RigidRepresentation:
 def to_rigid(pos: AtomRepresentation) -> Transformed[RigidRepresentation]:
     q, p, *_ = rigid.from_euclidean(pos[:3])
     ldj = rigid.from_euclidean_log_jacobian(pos[:3])
+    d_OM = geom.norm(pos[3] - p)
+    ldj -= jnp.log(4 * d_OM ** 4 + d_OM ** 2) / 2
     return Transformed(RigidRepresentation(q, p), ldj)
 
 
@@ -74,9 +66,9 @@ def from_rigid(rp: RigidRepresentation) -> Transformed[AtomRepresentation]:
     r_OM = geom.qrot3d(rp.rot, r_OM)
     pos = rigid.to_euclidean(rp.rot, rp.pos, *astuple(rp.ics)[:3])
     ldj = rigid.to_euclidean_log_jacobian(rp.rot, rp.pos, *astuple(rp.ics)[:3])
+    ldj += jnp.log(4 * rp.ics.d_OM ** 4 + rp.ics.d_OM ** 2) / 2
     pos = jnp.concatenate([pos, (pos[0] + r_OM)[None]], axis=0)
     return Transformed(pos, ldj)
-
 
 class RigidTransform(Transform[AtomRepresentation, RigidRepresentation]):
     def forward(

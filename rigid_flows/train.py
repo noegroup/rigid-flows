@@ -1,5 +1,6 @@
 from functools import partial
 from itertools import accumulate
+from math import prod
 from typing import Callable, Iterable, cast
 
 import equinox as eqx
@@ -72,6 +73,7 @@ def force_matching_loss_fn(
     omm_energy_model: OpenMMEnergyModel,
     num_samples: int,
     perturbation_noise: float,
+    ignore_charge_site: bool,
 ) -> LossFun:
     chain = key_chain(key)
     keys = jax.random.split(next(chain), num_samples)
@@ -85,13 +87,25 @@ def force_matching_loss_fn(
     _, omm_forces = wrap_openmm_model(omm_energy_model)[1](
         samples.pos, None, True
     )
+    if ignore_charge_site:
+        num_atoms = prod(samples.pos.shape[1:])
+        mask = (jnp.arange(num_atoms) % 4) == 3
+        mask = jnp.tile(mask[None], (num_samples, 1))
 
     def evaluate(flow: Transform[AugmentedData, State]) -> Array:
         flow_grads = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(
             samples
         )
         mse = 0
-        mse += jnp.mean(jnp.square(-flow_grads.pos - omm_forces))
+        mse += jnp.mean(
+            jnp.square(
+                -(
+                    flow_grads.pos.reshape(num_samples, -1)
+                    - omm_forces.reshape(num_samples, -1)
+                )
+                * mask
+            )
+        )
         mse += jnp.mean(jnp.square(flow_grads.aux - samples.aux))
         mse += jnp.mean(jnp.square(flow_grads.com - samples.com))
         return mse
@@ -188,7 +202,7 @@ def train_fn(
 ):
     params = eqx.filter(flow, eqx.is_array)
     optim = optax.adam(get_scheduler(specs))
-    optim = optax.apply_if_finite(optim, 10)
+    optim = optax.apply_if_finite(optim, specs.apply_if_finite_trials)
     if specs.use_grad_clipping:
         optim = optax.adaptive_grad_clip(specs.grad_clipping_ratio)
 
@@ -239,6 +253,7 @@ def train_fn(
                         omm_energy_model=target.model,
                         num_samples=specs.num_samples,
                         perturbation_noise=specs.fm_model_perturbation_noise,
+                        ignore_charge_site=specs.fm_ignore_charge_site,
                     ),
                     specs.weight_nll,
                 )
@@ -254,6 +269,7 @@ def train_fn(
                         omm_energy_model=target.model,
                         num_samples=specs.num_samples,
                         perturbation_noise=specs.fm_target_perturbation_noise,
+                        ignore_charge_site=specs.fm_ignore_charge_site,
                     ),
                     specs.weight_nll,
                 )

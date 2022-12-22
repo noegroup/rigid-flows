@@ -118,8 +118,9 @@ train:
 
     weight_fm_model: 0.
     fm_model_perturbation_noise: 0.
-    weight_fm_target: 0.
+    weight_fm_target: 0.01
     fm_target_perturbation_noise: 0.
+    fm_ignore_charge_site: true
 
     weight_fe: 0.
     weight_vg_model: 0.

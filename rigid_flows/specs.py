@@ -102,8 +102,11 @@ class TrainingSpecification:
     weight_fe: float
     weight_vg_model: float
     weight_vg_target: float
+
     fm_model_perturbation_noise: float
     fm_target_perturbation_noise: float
+    fm_ignore_charge_site: bool
+
     num_samples: int
     use_grad_clipping: bool
     grad_clipping_ratio: float

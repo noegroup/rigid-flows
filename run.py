@@ -76,7 +76,8 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
         next(chain),
         specs.model.auxiliary_shape,
         specs.model.flow,
-        prior=pos_prior,
+        pos_prior=pos_prior,
+        rot_prior=rot_prior,
     )
 
     logging.info(f"Initializing ActNorm")
@@ -131,7 +132,8 @@ def train(
         run_dir,
         specs.reporting,
         scope=None,
-        pos_prior=target.prior,
+        pos_prior=base.pos_prior,
+        rot_prior=base.rot_prior,
     )
     reporter.with_scope(f"initial").report_model(next(chain), flow, tot_iter)
     for stage, train_spec in enumerate(specs.train):

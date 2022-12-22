@@ -26,7 +26,7 @@ from flox.util import key_chain, unpack
 from .data import AugmentedData
 from .lowrank import LowRankFlow
 from .nn import MLPMixer, QuatEncoder
-from .prior import PositionPrior
+from .prior import PositionPrior, RotationPrior
 from .specs import (
     CouplingSpecification,
     FlowSpecification,
@@ -727,7 +727,8 @@ class PositionEncoder(eqx.Module):
 class InitialTransform:
     """Initial transform, transforming data into a state."""
 
-    prior: PositionPrior
+    pos_prior: PositionPrior
+    rot_prior: RotationPrior
 
     def forward(self, input: AugmentedData) -> Transformed[State]:
         rigid, ldj1 = unpack(
@@ -736,23 +737,29 @@ class InitialTransform:
         rigid = lenses.bind(rigid).rot.set(rigid.rot * input.sign)
         # pos = rigid.pos + input.com
         pos = rigid.pos
+        rot = rigid.rot
 
-        pos, ldj0 = unpack(self.prior.forward(pos))
+        pos, ldj0 = unpack(self.pos_prior.forward(pos))
+        rot, ldj2 = unpack(self.rot_prior.forward(rot))
 
-        ldj = ldj0 + ldj1
+        ldj = ldj0 + ldj1 + ldj2
 
-        state = State(rigid.rot, pos, rigid.ics, input.aux, input.box)
+        state = State(rot, pos, rigid.ics, input.aux, input.box)
         return Transformed(state, ldj)
 
     def inverse(self, input: State) -> Transformed[AugmentedData]:
 
-        pos, ldj0 = unpack(self.prior.inverse(input.pos))
+        pos = input.pos
+        rot = input.rot
 
-        rigid = jax.vmap(RigidRepresentation)(input.rot, pos)
+        pos, ldj0 = unpack(self.pos_prior.inverse(pos))
+        rot, ldj2 = unpack(self.rot_prior.inverse(rot))
+
+        rigid = jax.vmap(RigidRepresentation)(rot, pos)
         pos, ldj1 = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))
         sign = jnp.sign(input.rot[:, (0,)])
 
-        ldj = ldj0 + ldj1
+        ldj = ldj0 + ldj1 + ldj2
 
         com = jnp.mean(pos, axis=(0, 1))
 
@@ -764,7 +771,8 @@ def _preprocess(
     key: KeyArray,
     auxiliary_shape: tuple[int, ...],
     specs: PreprocessingSpecification,
-    prior: PositionPrior,
+    pos_prior: PositionPrior,
+    rot_prior: RotationPrior,
 ) -> Transform[AugmentedData, State]:
     """The initial blocks handing:
 
@@ -799,7 +807,7 @@ def _preprocess(
         aux_block += [ActNorm(lenses.lens.aux)]
     return Pipe(
         [
-            InitialTransform(prior=prior),
+            InitialTransform(pos_prior=pos_prior, rot_prior=rot_prior),
             # *aux_block,
             # *pos_block,
         ]
@@ -849,7 +857,7 @@ def _coupling(
         sub_block = Pipe(
             [
                 *aux_block,
-                # *pos_block,
+                *pos_block,
                 QuatUpdate(
                     auxiliary_shape=auxiliary_shape,
                     **asdict(specs.quaternion_update),
@@ -865,7 +873,8 @@ def build_flow(
     key: KeyArray,
     auxiliary_shape: tuple[int, ...],
     specs: FlowSpecification,
-    prior: PositionPrior,
+    pos_prior: PositionPrior,
+    rot_prior: RotationPrior,
 ) -> Pipe[AugmentedData, State]:
     """Creates the final flow composed of:
 
@@ -889,7 +898,11 @@ def build_flow(
     return Pipe[AugmentedData, State](
         [
             _preprocess(
-                next(chain), auxiliary_shape, specs.preprocessing, prior=prior
+                next(chain),
+                auxiliary_shape,
+                specs.preprocessing,
+                pos_prior=pos_prior,
+                rot_prior=rot_prior,
             ),
             couplings,
         ]

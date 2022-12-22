@@ -26,7 +26,7 @@ from flox._src.util.misc import unpack
 from .data import AugmentedData
 from .density import BaseDensity, KeyArray, TargetDensity
 from .flow import InitialTransform, State
-from .prior import PositionPrior
+from .prior import PositionPrior, RotationPrior
 from .specs import ReportingSpecifications
 from .system import OpenMMEnergyModel, SimulationBox
 from .utils import jit_and_cleanup_cache, scanned_vmap
@@ -408,6 +408,7 @@ class Reporter:
     specs: ReportingSpecifications
     scope: str | None
     pos_prior: PositionPrior
+    rot_prior: RotationPrior
 
     def report_model(
         self,
@@ -425,6 +426,7 @@ class Reporter:
             self.scope if self.scope else "",
             self.specs,
             self.pos_prior,
+            self.rot_prior,
         )
 
     def with_scope(self, scope) -> "Reporter":
@@ -435,6 +437,7 @@ class Reporter:
             self.specs,
             self.scope + "/" + scope if self.scope else scope,
             self.pos_prior,
+            self.rot_prior,
         )
 
 
@@ -448,6 +451,7 @@ def report_model(
     scope: str,
     specs: ReportingSpecifications,
     pos_prior: PositionPrior,
+    rot_prior: RotationPrior,
 ):
     chain = key_chain(key)
 
@@ -517,10 +521,10 @@ def report_model(
 
     # plot quaternion histograms
     if specs.plot_quaternions is not None:
-        data_quats = jax.vmap(InitialTransform(pos_prior).forward)(
+        data_quats = jax.vmap(InitialTransform(pos_prior, rot_prior).forward)(
             data_samples.obj
         ).obj.rot
-        model_quats = jax.vmap(InitialTransform(pos_prior).forward)(
+        model_quats = jax.vmap(InitialTransform(pos_prior, rot_prior).forward)(
             model_samples.obj
         ).obj.rot
         prior_quats = prior_samples.obj.rot

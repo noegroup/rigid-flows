@@ -109,6 +109,18 @@ class RotationPrior(eqx.Module):
         self.scale = jnp.stack(scales)
         self.vmf = tfp.distributions.VonMisesFisher(self.loc, self.scale)
 
+    def forward(self, p):
+        p = jax.vmap(lambda q, p: geom.qprod(geom.qconj(q), geom.qprod(p, q)))(
+            self.loc, p
+        )
+        return Transformed(p, jnp.zeros(()))
+
+    def inverse(self, p):
+        p = jax.vmap(lambda q, p: geom.qprod(q, geom.qprod(p, geom.qconj(q))))(
+            self.loc, p
+        )
+        return Transformed(p, jnp.zeros(()))
+
     def sample(self, seed: KeyArray):
         # return jax.vmap(geom.unit)(jax.random.normal(key, shape=self.loc.shape))
         return self.vmf.sample(seed=seed)

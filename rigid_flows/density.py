@@ -35,20 +35,23 @@ class BaseDensity(DensityModel[State]):
     def __init__(
         self,
         box: SimulationBox,
-        # rot_modes: Array,
-        # rot_concentration: Array,
-        # pos_prior: PositionPrior,
+        rot_modes: Array,
+        rot_concentration: Array,
+        pos_prior: PositionPrior,
         rot_prior: RotationPrior,
         pos_means: Array,
         pos_stds: Array,
         aux_means: Array,
         aux_stds: Array,
     ):
+        self.pos_prior = pos_prior
+        self.rot_prior = rot_prior
+
         self.box = box
-        # self.rot_model = tfp.distributions.VonMisesFisher(
-        #     rot_modes, rot_concentration
-        # )
-        self.rot_model = rot_prior
+        self.rot_model = tfp.distributions.VonMisesFisher(
+            rot_modes, rot_concentration
+        )
+        # self.rot_model = rot_prior
         self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
         # self.pos_model = pos_prior
 
@@ -118,13 +121,15 @@ class BaseDensity(DensityModel[State]):
         return BaseDensity(
             box=box,
             rot_prior=rot_prior,
-            # rot_modes=jnp.tile(
-            #     jnp.array([1.0, 0.0, 0.0, 0.0])[None],
-            #     (system_specs.num_molecules, 1),
-            # ),
-            # rot_concentration=base_specs.rot_concentration
-            # * jnp.ones((system_specs.num_molecules,)),
-            # pos_prior=pos_prior,
+            rot_modes=jnp.tile(
+                jnp.array([1.0, 0.0, 0.0, 0.0])[None],
+                (system_specs.num_molecules, 1),
+            ),
+            rot_concentration=(
+                base_specs.rot_concentration
+                * jnp.ones((system_specs.num_molecules,))
+            ),
+            pos_prior=pos_prior,
             pos_means=jnp.zeros(
                 (
                     system_specs.num_molecules,

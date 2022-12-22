@@ -1,9 +1,12 @@
+from functools import partial
+from itertools import accumulate
+from math import sqrt
+
 import equinox as eqx
 import jax
 from jax import numpy as jnp
-from jaxtyping import Array, Float  # type: ignore
+from jaxtyping import Array, Float
 
-from flox._src.nn.modules import dense
 from flox.util import key_chain
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -32,148 +35,391 @@ class QuatEncoder(eqx.Module):
         return (weight[..., None] * out[..., 1:]).sum(axis=0)
 
 
+class QuatEncoderSquare(eqx.Module):
+
+    encoder: eqx.nn.Linear
+    num_out: int
+    num_channels: int
+    norm: eqx.nn.LayerNorm
+
+    def __init__(self, num_channels: int, num_out: int, *, key: KeyArray):
+        self.encoder = eqx.nn.Linear(4, num_out * num_channels, key=key)
+        self.num_out = num_out
+        self.num_channels = num_channels
+        self.norm = eqx.nn.LayerNorm(self.num_out)
+
+    def __call__(self, quat):
+        feat = jax.vmap(self.encoder)(quat).reshape(
+            quat.shape[0], self.num_out, self.num_channels
+        )
+        out = (feat * feat).sum(axis=-1)
+        return jax.vmap(self.norm)(out)
+
+
+def modified_square_plus(x, a=0.2, b=1.0):
+    return ((1.0 - a) * x + jnp.sqrt(jnp.square(x) + b) / jnp.sqrt(1 + b)) / (
+        2 - a
+    )
+
+
+ACTIVATION_FUNCTIONS = {
+    "silu": jax.nn.silu,
+    "tanh": jax.nn.tanh,
+    "mish": lambda x: x * jax.nn.tanh(jax.nn.softplus(x)),
+    "gelu": jax.nn.gelu,
+    "siren": lambda x: jnp.sin(x),
+    "softplus": jax.nn.softplus,
+    "squareplus": modified_square_plus,
+}
+
+
 class Transformer(eqx.Module):
-    """Standard impl of a transformer according to the `attention is all you need` paper."""
 
-    attention_1: eqx.nn.MultiheadAttention
-    attention_2: eqx.nn.MultiheadAttention
-
-    norm_1: eqx.nn.LayerNorm
-    norm_2: eqx.nn.LayerNorm
-    norm_3: eqx.nn.LayerNorm
-
-    dense: eqx.nn.Sequential
+    params: eqx.nn.Linear
+    norm: eqx.nn.LayerNorm
+    num_heads: int
+    splits: tuple[int]
 
     def __init__(
-        self, num_heads: int, num_dims: int, num_hidden: int, *, key: KeyArray
+        self,
+        seq_len: int,
+        num_inp: int,
+        num_out: int,
+        num_hidden: int,
+        activation: str,
+        num_blocks: int = 0,
+        reduce_output: bool = False,
+        *,
+        key: KeyArray,
     ):
-        """Standard impl of a transformer according to the `attention is all you need` paper."
-
-        Args:
-            num_heads (int): number of transformer heads
-            num_dims (int): node dimensionality
-            num_hidden (int): hidden dimension of final dense layer
-            key (KeyArray): PRNG Key for layer initialization
-        """
-
         chain = key_chain(key)
-
-        self.attention_1 = eqx.nn.MultiheadAttention(
-            num_heads,
-            num_dims * num_heads,
-            use_key_bias=True,
-            use_query_bias=False,
-            use_output_bias=True,
+        self.num_heads = 8
+        self.params = eqx.nn.Linear(
+            num_inp,
+            (self.num_heads * (2 * num_hidden + num_out)),
             key=next(chain),
         )
+        self.norm = eqx.nn.LayerNorm(num_out, elementwise_affine=True)
 
-        self.attention_2 = eqx.nn.MultiheadAttention(
-            num_heads,
-            num_dims * num_heads,
-            use_key_bias=True,
-            use_query_bias=False,
-            use_output_bias=True,
-            key=next(chain),
+        self.splits = tuple(accumulate([num_hidden, num_hidden]))
+
+    def __call__(self, input, *args, **kwargs):
+
+        out = jax.vmap(self.params)(input).reshape(
+            input.shape[0], self.num_heads, -1
         )
+        keys, queries, values = jnp.split(out, self.splits, axis=-1)  # type: ignore
+        keys = keys / sqrt(keys.shape[-1])
+        logits = jnp.einsum("ihk, jhk -> ijh", keys, queries)
+        attention = jax.nn.softmax(logits, axis=1)
+        output = jnp.einsum("ijh, jhe -> ie", attention, values)
+        return jax.vmap(self.norm)(output)
 
-        self.norm_1 = eqx.nn.LayerNorm(
-            shape=(num_dims * num_heads), elementwise_affine=True
+
+class LayerStacked(eqx.Module):
+
+    layers: eqx.Module
+
+    def __init__(self, layers: list[eqx.Module]):
+        params, static = eqx.partition(layers, eqx.is_array)  # type: ignore
+        params = jax.tree_map(
+            lambda *args: jnp.stack(args),
+            *params,
+            is_leaf=lambda x: isinstance(x, jnp.ndarray),
         )
+        self.layers = eqx.combine(params, static[0])  # type: ignore
 
-        self.norm_2 = eqx.nn.LayerNorm(
-            shape=(num_dims * num_heads), elementwise_affine=True
+    def __call__(self, x):
+
+        params, static = eqx.partition(self.layers, eqx.is_array)  # type: ignore
+
+        def body(x, param):
+            fn = eqx.combine(param, static)
+            y = fn(x)  # type: ignore
+            return y, None
+
+        y, _ = jax.lax.scan(body, x, params)
+        return y
+
+
+class AttentiveLayerStacked(eqx.Module):
+
+    layers: eqx.Module
+    query: eqx.nn.Linear
+    keys: eqx.nn.Linear
+    norm: eqx.nn.LayerNorm
+
+    def __init__(
+        self, inp_dim: int, hidden: int, layers: list[eqx.Module], *, key
+    ):
+        chain = key_chain(key)
+        params, static = eqx.partition(layers, eqx.is_array)  # type: ignore
+        params = jax.tree_map(
+            lambda *args: jnp.stack(args),
+            *params,
+            is_leaf=lambda x: isinstance(x, jnp.ndarray),
         )
+        self.layers = eqx.combine(params, static[0])  # type: ignore
+        self.query = eqx.nn.Linear(inp_dim, hidden, key=next(chain))
+        self.keys = eqx.nn.Linear(inp_dim, hidden, key=next(chain))
+        self.norm = eqx.nn.LayerNorm(inp_dim, elementwise_affine=True)
 
-        self.norm_3 = eqx.nn.LayerNorm(
-            shape=(num_dims * num_heads), elementwise_affine=True
+    def __call__(self, x):
+
+        x = self.norm(x)
+
+        params, static = eqx.partition(self.layers, eqx.is_array)  # type: ignore
+
+        def body(x, param):
+            fn = eqx.combine(param, static)
+            y = fn(x)  # type: ignore
+            return y, y
+
+        _, ys = jax.lax.scan(body, x, params)
+
+        query = jax.vmap(self.query)(x)
+        keys = jax.vmap(jax.vmap(self.keys))(ys)
+
+        logits = jnp.einsum("nk, ink -> ni", query, keys)
+        attention = jax.nn.softmax(logits, axis=0)
+
+        output = jnp.einsum("ni, ink -> nk", attention, ys)
+        return output
+
+
+class MLPMixerLayer(eqx.Module):
+
+    token_mixer: eqx.nn.Sequential
+    dim_mixer: eqx.nn.Sequential
+    token_norm: eqx.nn.LayerNorm
+    dim_norm: eqx.nn.LayerNorm
+
+    def __init__(
+        self,
+        seq_len: int,
+        num_inp: int,
+        expansion_factor: float,
+        activation,
+        *,
+        key,
+    ) -> None:
+        chain = key_chain(key)
+        num_hidden = int(num_inp * expansion_factor)
+        self.dim_mixer = eqx.nn.Sequential(
+            [
+                eqx.nn.Linear(num_inp, num_hidden, key=next(chain)),
+                eqx.nn.Lambda(activation),
+                eqx.nn.Linear(num_hidden, num_inp, key=next(chain)),
+            ]
         )
+        self.dim_norm = eqx.nn.LayerNorm(num_inp, elementwise_affine=True)
 
-        self.dense = dense(
-            (num_dims * num_heads, num_hidden, num_dims * num_heads),
-            jax.nn.silu,
-            key=next(chain),
+        self.token_mixer = eqx.nn.Sequential(
+            [
+                eqx.nn.Linear(seq_len, num_hidden, key=next(chain)),
+                eqx.nn.Lambda(activation),
+                eqx.nn.Linear(num_hidden, seq_len, key=next(chain)),
+            ]
         )
+        self.token_norm = eqx.nn.LayerNorm(num_inp, elementwise_affine=True)
 
-    def __call__(
-        self, input: Float[Array, "... seq_len node_dim"]
-    ) -> Float[Array, "... seq_len node_dim"]:
-
-        input += self.attention_1(input, input, input)
-        input = jax.vmap(self.norm_1)(input)
-
-        input += self.attention_2(input, input, input)
-        input = jax.vmap(self.norm_2)(input)
-
-        input += jax.vmap(self.dense)(input)
-        input = jax.vmap(self.norm_3)(input)
-
+    def __call__(self, input):
+        input = input + jax.vmap(self.dim_mixer, in_axes=0)(
+            jax.vmap(self.dim_norm)(input)
+        )
+        input = input + jax.vmap(self.token_mixer, in_axes=1, out_axes=1)(
+            jax.vmap(self.token_norm)(input)
+        )
         return input
 
 
-class TransformerStack(eqx.Module):
-    """Stack of transformer layers.
+class MLPMixer(eqx.Module):
 
-    DISCLAIMER: right now only implements a simple dense net!!!!
-    """
+    encoder: eqx.nn.Linear
+    decoder: eqx.nn.Linear
+    mixers: LayerStacked | AttentiveLayerStacked
+    norm: eqx.nn.LayerNorm
 
-    # encoder: eqx.nn.Linear
-    # decoder: eqx.nn.Linear
+    def __init__(
+        self,
+        seq_len: int,
+        num_inp: int,
+        num_out: int,
+        expansion_factor: float,
+        activation: str,
+        num_blocks: int = 0,
+        *,
+        key: KeyArray,
+    ):
+        chain = key_chain(key)
+        num_hidden = int(num_inp * expansion_factor)
+        self.encoder = eqx.nn.Linear(num_inp, num_hidden, key=next(chain))
+        self.mixers = LayerStacked(
+            [
+                MLPMixerLayer(
+                    seq_len,
+                    num_hidden,
+                    expansion_factor,
+                    ACTIVATION_FUNCTIONS[activation],
+                    key=next(chain),
+                )
+                for _ in range(num_blocks)
+            ],
+        )
+        self.decoder = eqx.nn.Linear(num_hidden, num_out, key=next(chain))
+        self.norm = eqx.nn.LayerNorm(num_hidden, elementwise_affine=True)
 
-    # transformers: tuple[Transformer]
+    def __call__(self, input):
+        hidden = jax.vmap(self.encoder)(input)
+        hidden = self.mixers(hidden)
+        hidden = self.norm(hidden)
+        out = jax.vmap(self.decoder)(hidden)
+        return out
 
-    reduce_output: bool
 
-    # use simple dense net for now as transformers don't work (yet)
-    foo: eqx.nn.Sequential
+class RotationTransformerLayer(eqx.Module):
+
+    keys: eqx.nn.Linear
+    queries: eqx.nn.Linear
+    features: eqx.nn.Sequential
 
     def __init__(
         self,
         num_inp: int,
-        num_out: int,
-        num_heads: int,
-        num_dims: int,
-        num_hidden: int,
-        num_blocks: int = 0,
-        reduce_output: bool = False,
+        num_channels: int,
+        features: eqx.nn.Sequential,
         *,
-        key: KeyArray
+        key,
     ):
         chain = key_chain(key)
-        # self.encoder = eqx.nn.Linear(
-        #     num_inp, num_heads * num_dims, key=next(chain)
-        # )
-        # self.transformers = tuple(
-        #     Transformer(num_heads, num_dims, num_hidden, key=next(chain))
-        #     for _ in range(num_blocks)
-        # )
-        # self.decoder = eqx.nn.Linear(
-        #     num_heads * num_dims, num_out, key=next(chain)
-        # )
-
-        self.foo = eqx.nn.Sequential(
-            [
-                eqx.nn.Linear(num_inp * 16, num_hidden, key=next(chain)),
-                eqx.nn.LayerNorm((num_hidden,), elementwise_affine=True),
-                eqx.nn.Lambda(jax.nn.silu),
-                eqx.nn.Linear(num_hidden, num_hidden, key=next(chain)),
-                eqx.nn.LayerNorm((num_hidden,), elementwise_affine=True),
-                eqx.nn.Lambda(jax.nn.silu),
-                eqx.nn.Linear(num_hidden, num_out * 16, key=next(chain)),
-            ]
-        )
-        self.reduce_output = reduce_output
+        self.keys = eqx.nn.Linear(num_inp, num_channels, key=next(chain))
+        self.queries = eqx.nn.Linear(num_inp, num_channels, key=next(chain))
+        self.features = features
 
     def __call__(
-        self, input: Float[Array, "... seq_len node_dim"]
-    ) -> Float[Array, "... seq_len node_dim"]:
-        out = self.foo(input.reshape(-1))
-        if self.reduce_output:
-            out = out.sum(axis=0)
-        else:
-            out = out.reshape(16, -1)
-        return out
-        input = jax.vmap(self.encoder)(input)
-        for transformer in self.transformers:
-            input = transformer(input)
+        self,
+        rotations,
+        features,
+    ) -> None:
+        rotations = jnp.concatenate([rotations, -rotations], axis=0)
+        keys = jax.vmap(self.keys)(rotations)
+        queries = jax.vmap(self.queries)(rotations)
 
-        return jax.vmap(self.decoder)(input)
+        logits = jnp.einsum("ik, jk -> ij", queries, keys)
+        attention = jax.nn.softmax(logits, axis=0)
+
+        out = self.features(features)
+        output = jnp.einsum("ij, jk -> k", attention, out)
+
+        return output
+
+
+class PositionTransformerLayer(eqx.Module):
+
+    keys: eqx.nn.Linear
+    queries: eqx.nn.Linear
+    features: eqx.nn.Sequential
+
+    def __init__(
+        self,
+        num_inp: int,
+        num_channels: int,
+        features: eqx.nn.Sequential,
+        *,
+        key,
+    ):
+        chain = key_chain(key)
+        self.keys = eqx.nn.Linear(num_inp, num_channels, key=next(chain))
+        self.queries = eqx.nn.Linear(num_inp, num_channels, key=next(chain))
+        self.features = features
+
+    def __call__(
+        self,
+        displacements,
+        features,
+    ):
+        keys = jax.vmap(self.keys)(displacements)
+        queries = jax.vmap(self.queries)(displacements)
+
+        logits = jnp.einsum("ik, jk -> ij", queries, keys)
+        attention = jax.nn.softmax(logits, axis=0)
+
+        out = self.features(features)
+        output = jnp.einsum("ij, jk -> k", attention, out)
+
+        return output
+
+
+class ResNetLayer(eqx.Module):
+
+    residual: eqx.nn.Sequential
+    norm: eqx.nn.LayerNorm
+
+    def __init__(
+        self,
+        num_inp: int,
+        expansion_factor: float,
+        activation,
+        *,
+        key,
+    ) -> None:
+        chain = key_chain(key)
+        num_hidden = int(num_inp * expansion_factor)
+        self.residual = eqx.nn.Sequential(
+            [
+                eqx.nn.Linear(num_inp, num_hidden, key=next(chain)),
+                eqx.nn.Lambda(activation),
+                eqx.nn.Linear(num_hidden, num_inp, key=next(chain)),
+            ]
+        )
+        self.norm = eqx.nn.LayerNorm(num_inp)
+
+    def __call__(self, input: Array):
+        return input + self.residual(self.norm(input))
+
+
+class ResNet(eqx.Module):
+
+    encoder: eqx.nn.Linear
+    decoder: eqx.nn.Linear
+    residuals: LayerStacked | AttentiveLayerStacked
+    norm: eqx.nn.LayerNorm
+
+    def __init__(
+        self,
+        seq_len: int,
+        num_inp: int,
+        num_out: int,
+        expansion_factor: float,
+        activation: str,
+        num_blocks: int = 0,
+        *,
+        key: KeyArray,
+    ):
+        chain = key_chain(key)
+
+        num_hidden = int(num_inp * expansion_factor)
+        self.encoder = eqx.nn.Linear(num_inp, num_hidden, key=next(chain))
+        self.residuals = LayerStacked(
+            # seq_len * num_hidden,
+            # 32,
+            [
+                ResNetLayer(
+                    seq_len * num_hidden,
+                    expansion_factor,
+                    ACTIVATION_FUNCTIONS[activation],
+                    key=next(chain),
+                )
+                for _ in range(num_blocks)
+            ],
+            # key=next(chain),
+        )
+        self.decoder = eqx.nn.Linear(num_hidden, num_out, key=next(chain))
+        self.norm = eqx.nn.LayerNorm(num_hidden, elementwise_affine=True)
+
+    def __call__(self, input):
+        hidden = jax.vmap(self.encoder)(input)
+        hidden = self.residuals(hidden.reshape(-1))
+        hidden = jax.vmap(self.norm)(hidden.reshape(input.shape[0], -1))
+        out = jax.vmap(self.decoder)(hidden)
+        return out

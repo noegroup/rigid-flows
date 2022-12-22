@@ -513,7 +513,7 @@ def report_model(
         fig = plot_quaternions(
             data_quats, model_quats, prior_quats, specs.plot_quaternions
         )
-        write_figure_to_tensorboard(f"{scope}/plots/quaternions", fig, tot_iter)
+        write_figure_to_tensorboard(f"plots/quaternions/{scope}", fig, tot_iter)
 
     # plot oxygen histograms
     if specs.plot_oxygens:
@@ -533,7 +533,7 @@ def report_model(
         )[:, :, 0]
         logging.info(f"plotting oxygens")
         fig = plot_oxygen_positions(model_pos, data_pos, target.box)
-        write_figure_to_tensorboard(f"{scope}/plots/oxygens", fig, tot_iter)
+        write_figure_to_tensorboard(f"plots/oxygens/{scope}", fig, tot_iter)
 
     # report ESS
     if specs.report_ess:
@@ -595,7 +595,7 @@ def report_model(
             step=tot_iter,
         )
         write_figure_to_tensorboard(
-            f"{scope}/plots/energies/open_mm", fig, tot_iter
+            f"plots/energies/open_mm/{scope}", fig, tot_iter
         )
 
         fig = plot_energy_histogram(
@@ -615,7 +615,7 @@ def report_model(
             step=tot_iter,
         )
         write_figure_to_tensorboard(
-            f"{scope}/plots/energies/total", fig, tot_iter
+            f"plots/energies/total/{scope}", fig, tot_iter
         )
 
         fig = plot_energy_histogram(
@@ -633,5 +633,5 @@ def report_model(
             step=tot_iter,
         )
         write_figure_to_tensorboard(
-            f"{scope}/plots/energies/auxiliary", fig, tot_iter
+            f"plots/energies/auxiliary/{scope}", fig, tot_iter
         )

@@ -8,11 +8,12 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import tensorflow_probability.substrates.jax as tfp  # type: ignore
+from jax import Array
+from jax_dataclasses import pytree_dataclass
+
 from flox import geom
 from flox.flow import Transformed
 from flox.util import key_chain
-from jax import Array
-from jax_dataclasses import pytree_dataclass
 
 from .data import AugmentedData, Data
 from .flow import InternalCoordinates, State
@@ -52,7 +53,9 @@ class PositionPrior(eqx.Module):
 
         # r = oxy.reshape(oxy.shape[0], -1)
 
-        r = jax.vmap(lambda x: geom.Torus(self.box.size).tangent(x, x - self.mean))(oxy)
+        r = jax.vmap(
+            lambda x: geom.Torus(self.box.size).tangent(x, x - self.mean)
+        )(oxy)
         r = r.reshape(r.shape[0], -1)
         # self.mean = jnp.mean(r, axis=0).reshape(oxy.shape[1:])
 
@@ -88,18 +91,17 @@ class BaseDensity(DensityModel[State]):
         box: SimulationBox,
         rot_modes: Array,
         rot_concentration: Array,
-        prior: PositionPrior,
-        # pos_means: Array,
-        # pos_stds: Array,
-        # pos_modes: Array,
-        # pos_concentration,
+        pos_means: Array,
+        pos_stds: Array,
         aux_means: Array,
         aux_stds: Array,
     ):
         self.box = box
-        self.rot_model = tfp.distributions.VonMisesFisher(rot_modes, rot_concentration)
-        # self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
-        self.pos_model = prior
+        self.rot_model = tfp.distributions.VonMisesFisher(
+            rot_modes, rot_concentration
+        )
+        self.pos_model = tfp.distributions.Normal(pos_means, pos_stds)
+        # self.pos_model = prior
         # self.pos_model = tfp.distributions.VonMisesFisher(
         #     pos_modes, pos_concentration
         # )
@@ -128,7 +130,6 @@ class BaseDensity(DensityModel[State]):
             axis=0,
         ).sum()
         pos_prob = self.pos_model.log_prob(inp.pos).sum()
-        # com_prob = self.com_model.log_prob(inp.com).sum()
         aux_prob = self.aux_model.log_prob(inp.aux).sum()
         return -(rot_prob + aux_prob + pos_prob)
 
@@ -145,9 +146,10 @@ class BaseDensity(DensityModel[State]):
         chain = key_chain(key)
 
         rot = self.rot_model.sample(seed=next(chain))
-        rot = rot * jnp.sign(jax.random.normal(next(chain), shape=(rot.shape[0], 1)))
+        rot = rot * jnp.sign(
+            jax.random.normal(next(chain), shape=(rot.shape[0], 1))
+        )
         pos = self.pos_model.sample(seed=next(chain))
-        # com = self.com_model.sample(seed=next(chain))
         ics = InternalCoordinates()
         aux = self.aux_model.sample(seed=next(chain))
         state = State(rot, pos, ics, aux, self.box)
@@ -170,20 +172,13 @@ class BaseDensity(DensityModel[State]):
             ),
             rot_concentration=base_specs.rot_concentration
             * jnp.ones((system_specs.num_molecules,)),
-            prior=prior,
-            # pos_means=jnp.zeros(
-            #     (
-            #         system_specs.num_molecules,
-            #         3,
-            #     )
-            # ),
-            # pos_stds=jnp.ones((system_specs.num_molecules, 3)),
-            # pos_modes=jnp.tile(
-            #     jnp.array([1.0, 0.0])[None, None],
-            #     (system_specs.num_molecules, 3, 1),
-            # ),
-            # pos_concentration=base_specs.pos_concentration
-            # * jnp.ones((system_specs.num_molecules, 3)),
+            pos_means=jnp.zeros(
+                (
+                    system_specs.num_molecules,
+                    3,
+                )
+            ),
+            pos_stds=jnp.ones((system_specs.num_molecules, 3)),
             aux_means=jnp.zeros(auxiliary_shape),
             aux_stds=jnp.ones(auxiliary_shape),
         )
@@ -234,7 +229,7 @@ class TargetDensity(DensityModel[AugmentedData]):
         aux_stds = jnp.ones(auxiliary_shape)
 
         com_means = jnp.zeros((3,))
-        com_stds = jnp.ones((3,)) * 5e-2
+        com_stds = jnp.ones((3,))
 
         self.aux_model = tfp.distributions.Normal(aux_means, aux_stds)
         self.com_model = tfp.distributions.Normal(com_means, com_stds)
@@ -269,7 +264,7 @@ class TargetDensity(DensityModel[AugmentedData]):
             box = inp.box.size
 
         energy = partial(
-            wrap_openmm_model(self.model),
+            wrap_openmm_model(self.model)[0],
             box=box,
             has_batch_dim=False,
         )
@@ -317,20 +312,24 @@ class TargetDensity(DensityModel[AugmentedData]):
             aux = self.aux_model.sample(seed=next(chain))
             com = self.com_model.sample(seed=next(chain))
 
-            # pos = pos - pos.mean(axis=(0, 1))
+            pos = pos - pos.mean(axis=(0, 1))
 
             if self.data.force is not None:
                 force = self.data.force[idx]
-                # force += jax.grad(lambda x: self.com_model.log_prob(x).sum())(
-                #     com
-                # )
+                force += jax.grad(lambda x: self.com_model.log_prob(x).sum())(
+                    com
+                )
             else:
                 force = None
 
             sign = jnp.sign(
-                jax.random.normal(next(chain), shape=(self.sys_specs.num_molecules, 1))
+                jax.random.normal(
+                    next(chain), shape=(self.sys_specs.num_molecules, 1)
+                )
             )
-            return Transformed(AugmentedData(pos, com, aux, sign, box, force), energy)
+            return Transformed(
+                AugmentedData(pos, com, aux, sign, box, force), energy
+            )
 
     @staticmethod
     def from_specs(
@@ -341,6 +340,11 @@ class TargetDensity(DensityModel[AugmentedData]):
         data = Data.from_specs(sys_specs)
         prior = PositionPrior(data)
         model = OpenMMEnergyModel.from_specs(sys_specs)
+        model.set_softcore_cutoff(
+            sys_specs.softcore_cutoff,
+            sys_specs.softcore_potential,
+            sys_specs.softcore_slope,
+        )
         if sys_specs.recompute_forces:
             data = data.recompute_forces(model)
         elif sys_specs.forces_path:

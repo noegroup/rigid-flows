@@ -85,7 +85,9 @@ class OpenMMEnergyModel:
         slope: used only when type='square'
         """
         my_lennard_jones = partial(
-            lennard_jones, sigma=self.model.sigma_O, epsilon=self.model.epsilon_O
+            lennard_jones,
+            sigma=self.model.sigma_O,
+            epsilon=self.model.epsilon_O,
         )
         if cutoff is None:
             expr = parse_jaxpr(my_lennard_jones)[0]
@@ -143,7 +145,9 @@ class OpenMMEnergyModel:
 
                 state = self.context.getState(getEnergy=True, getForces=True)
                 energy = (
-                    state.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
+                    state.getPotentialEnergy().value_in_unit(
+                        unit.kilojoule_per_mole
+                    )
                     / self.kbT
                 )
                 force = (
@@ -175,7 +179,9 @@ class OpenMMEnergyModel:
 
 
 def wrap_openmm_model(model: OpenMMEnergyModel):
-    def compute_energy_and_forces(pos: Array, box: Array | None, has_batch_dim: bool):
+    def compute_energy_and_forces(
+        pos: Array, box: Array | None, has_batch_dim: bool
+    ):
 
         if box is not None:
             assert box.shape == (3,)
@@ -185,7 +191,11 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
             assert pos.shape == (model.model.n_waters, model.model.n_sites, 3)
             pos = jnp.expand_dims(pos, axis=0)
         else:
-            assert pos.shape[1:] == (model.model.n_waters, model.model.n_sites, 3)
+            assert pos.shape[1:] == (
+                model.model.n_waters,
+                model.model.n_sites,
+                3,
+            )
 
         pos_flat = pos.reshape(pos.shape[0], -1, 3)
 
@@ -220,28 +230,35 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
 
     eval.defvjp(eval_fwd, eval_bwd)
 
-    return eval
+    return eval, compute_energy_and_forces
 
 
 def lennard_jones(r, sigma, epsilon):
     return 4 * epsilon * ((sigma / r) ** 12 - (sigma / r) ** 6)
 
 
-def parse_jaxpr(fn: Callable, args: tuple[str] | None = None, symbols: dict = {}):
+def parse_jaxpr(
+    fn: Callable, args: tuple[str] | None = None, symbols: dict = {}
+):
 
     placeholders = []
+    defaults = []
 
     if args is None:
         sig = inspect.signature(fn)
         for key, val in sig.parameters.items():
-            if val.default == inspect._empty:
+            if val.default != inspect._empty:
+                defaults.append(val.default)
+            else:
                 placeholders.append(key)
 
-    jaxpr_kwargs = {key: jax.ShapedArray((), dtype=jnp.float32) for key in placeholders}
-    jaxpr = jax.make_jaxpr(fn)(**jaxpr_kwargs)
+    jaxpr_kwargs = [
+        jax.ShapedArray((), dtype=jnp.float32) for _ in placeholders
+    ]
+    jaxpr = jax.make_jaxpr(fn)(*jaxpr_kwargs)
     symbols = {
-        str(sym): val if val not in symbols else symbols[val]
-        for (sym, val) in zip(jaxpr.jaxpr.invars, placeholders)
+        str(sym): key if key not in symbols else symbols[key]
+        for (sym, key) in zip(jaxpr.jaxpr.invars, placeholders, strict=True)
     }
 
     def fetch_symbol(arg):
@@ -285,27 +302,27 @@ def parse_jaxpr(fn: Callable, args: tuple[str] | None = None, symbols: dict = {}
     return tuple(map(fetch_symbol, jaxpr.jaxpr.outvars))
 
 
-def approx_with_square(original, cutoff: Array, slope: float):
-    y0, dyx0 = jax.value_and_grad(original)(cutoff)
+def approx_with_square(original, cutoff: float, slope: float):
+    y0, dyx0 = map(float, jax.value_and_grad(original)(cutoff))
     a = slope
     b = dyx0 - 2 * a * cutoff
     c = y0 - a * cutoff**2 - b * cutoff
 
-    def approx(r):
+    def approx(r, a, b, c):
         return a * r**2 + b * r + c
 
-    return approx
+    return partial(approx, a=a, b=b, c=c)
 
 
-def approx_with_linear(original, cutoff: Array):
-    y0, dyx0 = jax.value_and_grad(original)(cutoff)
+def approx_with_linear(original, cutoff: float):
+    y0, dyx0 = map(float, jax.value_and_grad(original)(cutoff))
     a = dyx0
     b = y0 - a * cutoff
 
-    def approx(r):
+    def approx(r, a, b):
         return a * r + b
 
-    return approx
+    return partial(approx, a=a, b=b)
 
 
 def get_approx_expr(fun, approximation, cutoff, **kwargs):

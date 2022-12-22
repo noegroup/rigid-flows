@@ -6,6 +6,8 @@ from dataclasses import asdict
 from typing import cast
 
 import equinox as eqx
+import git
+import jax
 import tensorflow as tf  # type: ignore
 from rigid_flows.data import AugmentedData
 from rigid_flows.density import (
@@ -14,7 +16,12 @@ from rigid_flows.density import (
     PositionPrior,
     TargetDensity,
 )
-from rigid_flows.flow import State, build_flow
+from rigid_flows.flow import (
+    State,
+    build_flow,
+    initialize_actnorm,
+    toggle_layer_stack,
+)
 from rigid_flows.reporting import Reporter, pretty_json
 from rigid_flows.specs import ExperimentSpecification
 from rigid_flows.train import run_training_stage
@@ -28,10 +35,10 @@ def backup_config_file(run_dir: str, specs_path: str):
     shutil.copy(specs_path, f"{run_dir}/config.yaml")
 
 
-def setup_tensorboard(run_dir: str):
-    local_run_dir = (
-        f"{run_dir}/{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}"
-    )
+def setup_tensorboard(run_dir: str, label: str):
+    import socket
+
+    local_run_dir = f"{run_dir}/{socket.gethostname()}_{label}_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}"
 
     writer = tf.summary.create_file_writer(local_run_dir)
 
@@ -61,6 +68,21 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
     flow = build_flow(
         next(chain), specs.model.auxiliary_shape, specs.model.flow
     )
+
+    logging.info(f"Initializing ActNorm")
+
+    @eqx.filter_jit
+    def init_actnorm(flow, key):
+        actnorm_batch = jax.vmap(target.sample)(
+            jax.random.split(key, specs.act_norm_init_samples)
+        ).obj
+        flow = toggle_layer_stack(flow, False)
+        flow, _ = initialize_actnorm(flow, actnorm_batch)
+        flow = toggle_layer_stack(flow, True)
+        return flow
+
+    flow = init_actnorm(flow, next(chain))
+
     if specs.model.pretrained_model_path is not None:
         logging.info(
             f"Loading pre-trained model from {specs.model.pretrained_model_path}."
@@ -85,8 +107,13 @@ def train(
     tot_iter: int,
 ) -> Transform[AugmentedData, State]:
     chain = key_chain(key)
-    tf.summary.text("run_params", pretty_json(asdict(specs)), step=tot_iter)
-    logger = logging.getLogger("main")
+    repo = git.Repo(search_parent_directories=True)
+    branch = repo.active_branch.name
+    sha = repo.head.object.hexsha
+
+    log = asdict(specs)
+    log["git"] = {"branch": branch, "sha": sha}
+    tf.summary.text("run_params", pretty_json(log), step=tot_iter)
     logging.info(f"Starting training.")
     reporter = Reporter(base, target, run_dir, specs.reporting, scope=None)
     reporter.with_scope(f"initial").report_model(next(chain), flow, tot_iter)
@@ -97,6 +124,7 @@ def train(
             target,
             flow,
             train_spec,
+            specs.system,
             reporter.with_scope(f"training_stage_{stage}"),
             tot_iter,
         )
@@ -111,9 +139,10 @@ def main():
     parser = argparse.ArgumentParser()
     parser.add_argument("--specs", type=str, required=True)
     parser.add_argument("--run_dir", type=str, required=True)
+    parser.add_argument("--label", type=str, required=False, default="")
     args = parser.parse_args()
 
-    writer, local_run_dir = setup_tensorboard(args.run_dir)
+    writer, local_run_dir = setup_tensorboard(args.run_dir, args.label)
 
     logging.getLogger().setLevel(logging.INFO)
 

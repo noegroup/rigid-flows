@@ -19,25 +19,49 @@ class ReportingSpecifications:
 
 
 @pytree_dataclass(frozen=True)
-class TransformerStackSpecification:
-    num_heads: int
+class PosEncoderSpecification:
+    seq_len: int
+    activation: str
+    num_pos: int
+    expansion_factor: int
+    num_blocks: int
+
+
+@pytree_dataclass(frozen=True)
+class PosAndAuxUpdateSpecification:
+    seq_len: int
+    activation: str
     num_dims: int
-    num_hidden: int
+    num_pos: int
+    expansion_factor: int
+    num_blocks: int
+    transform: str
+    num_low_rank: int
+    low_rank_regularizer: float
+
+
+@pytree_dataclass(frozen=True)
+class QuatUpdateSpecification:
+    seq_len: int
+    activation: str
+    expansion_factor: int
     num_blocks: int
 
 
 @pytree_dataclass(frozen=True)
 class PreprocessingSpecification:
-    auxiliary_update: TransformerStackSpecification
-    displacement_encoder: TransformerStackSpecification
+    auxiliary_update: PosAndAuxUpdateSpecification
+    position_encoder: PosEncoderSpecification
+    act_norm: bool
 
 
 @pytree_dataclass(frozen=True)
 class CouplingSpecification:
     num_repetitions: int
-    auxiliary_update: TransformerStackSpecification
-    position_update: TransformerStackSpecification
-    quaternion_update: TransformerStackSpecification
+    auxiliary_update: PosAndAuxUpdateSpecification
+    position_update: PosAndAuxUpdateSpecification
+    quaternion_update: QuatUpdateSpecification
+    act_norm: bool
 
 
 @pytree_dataclass(frozen=True)
@@ -73,12 +97,17 @@ class TrainingSpecification:
     init_learning_rate: float
     target_learning_rate: float
     weight_nll: float
-    weight_fm: float
+    weight_fm_model: float
+    weight_fm_target: float
     weight_fe: float
     weight_vg_model: float
     weight_vg_target: float
-    fm_aggregation: str | None
+    fm_model_perturbation_noise: float
+    fm_target_perturbation_noise: float
     num_samples: int
+    use_grad_clipping: bool
+    grad_clipping_ratio: float
+    apply_if_finite_trials: int
 
     @property
     def num_iterations(self):
@@ -95,6 +124,11 @@ class SystemSpecification:
     store_forces: bool
     forces_path: str | None
     fixed_box: bool
+
+    softcore_cutoff: float
+    softcore_potential: str
+    softcore_slope: float
+
     water_type: str = "tip4pew"
 
     def __str__(self) -> str:
@@ -112,6 +146,7 @@ class ExperimentSpecification:
     train: tuple[TrainingSpecification]
     reporting: ReportingSpecifications
     global_step: int | None
+    act_norm_init_samples: int
 
     @staticmethod
     def load_from_file(path: str) -> "ExperimentSpecification":

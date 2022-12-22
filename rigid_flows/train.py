@@ -1,17 +1,25 @@
 from functools import partial
 from itertools import accumulate
-from typing import cast
+from typing import Callable, Iterable, cast
 
 import equinox as eqx
 import jax
+import lenses
 import optax
 import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
+from optax import (
+    GradientTransformation,
+    OptState,
+    huber_loss,
+    safe_root_mean_squares,
+)
 from tqdm import tqdm
 
+from flox._src.flow.potential import Potential, PushforwardPotential
+from flox._src.flow.sampling import PushforwardSampler, Sampler
 from flox.flow import PullbackSampler, Transform
 from flox.util import key_chain, unpack
 
@@ -19,155 +27,14 @@ from .data import AugmentedData
 from .density import BaseDensity, DensityModel, TargetDensity
 from .flow import State
 from .reporting import Reporter
-from .specs import TrainingSpecification
+from .specs import SystemSpecification, TrainingSpecification
+from .system import OpenMMEnergyModel, wrap_openmm_model
 from .utils import jit_and_cleanup_cache
 
 KeyArray = Array | jax.random.PRNGKeyArray
 
 
 Flow = Transform[AugmentedData, State]
-
-
-def negative_log_likelihood(
-    inp: AugmentedData,
-    base: DensityModel,
-    flow: Transform[AugmentedData, State],
-):
-    out, ldj = unpack(flow.forward(inp))
-    return jnp.sum(base.potential(out) - ldj)
-
-
-def flow_force(
-    inp: AugmentedData,
-    base: DensityModel,
-    flow: Transform[AugmentedData, State],
-):
-    return -jax.grad(negative_log_likelihood)(inp, base, flow).pos
-
-
-def force_matching_loss(
-    inp: AugmentedData,
-    base: DensityModel,
-    flow: Transform[AugmentedData, State],
-    aggregation: str,
-):
-    assert inp.force is not None
-    diff = flow_force(inp, base, flow).reshape(-1) - inp.force.reshape(-1)
-    if aggregation == "mse":
-        return 0.5 * jnp.square(diff).sum()
-    elif aggregation == "rmse":
-        return safe_root_mean_squares(diff, 1e-12).sum()
-    elif aggregation == "mae":
-        return jnp.abs(diff).sum()
-    elif aggregation == "huber":
-        return huber_loss(diff).sum()
-    else:
-        raise NotImplementedError(f"{aggregation}")
-
-
-def free_energy_loss(
-    inp: State,
-    target: DensityModel,
-    flow: Transform[AugmentedData, State],
-):
-    out, ldj = unpack(flow.inverse(inp))
-    return jnp.sum(target.potential(out) - ldj)
-
-
-def energy_difference(
-    inp: AugmentedData,
-    base: DensityModel,
-    target: DensityModel,
-    flow: Transform[AugmentedData, State],
-):
-    model_energy = negative_log_likelihood(inp, base, flow)
-    target_energy = target.potential(inp)
-    return target_energy - model_energy
-
-
-def per_sample_loss(
-    key: KeyArray,
-    base: DensityModel,
-    target: DensityModel,
-    flow: Transform[AugmentedData, State],
-    weight_nll: float,
-    weight_fm: float,
-    weight_fe: float,
-    weight_vg_target: float,
-    weight_vg_model: float,
-    fm_aggregation: str | None,
-):
-    chain = key_chain(key)
-
-    total_loss = 0
-    num_losses = 0
-    losses = {}
-    var_grad_losses = {}
-    if weight_nll > 0:
-        inp, _ = unpack(target.sample(next(chain)))
-        nll_loss = negative_log_likelihood(inp, base, flow)
-        losses["nll"] = nll_loss
-        total_loss += weight_nll * nll_loss
-    if weight_fm > 0:
-        assert fm_aggregation is not None
-        inp, _ = unpack(target.sample(next(chain)))
-        fm_loss = force_matching_loss(inp, base, flow, fm_aggregation)
-        losses["fm"] = fm_loss
-        total_loss += weight_fm * fm_loss
-
-    if weight_fe > 0:
-        inp, _ = unpack(base.sample(next(chain)))
-        kl_loss = free_energy_loss(inp, target, flow)
-        losses["kl"] = kl_loss
-        total_loss += weight_fe * kl_loss
-    if weight_vg_target > 0:
-        inp, _ = unpack(target.sample(next(chain)))
-        var_grad_losses["target"] = energy_difference(inp, base, target, flow)
-    if weight_vg_model > 0:
-        inp, _ = unpack(PullbackSampler(base.sample, flow)(next(chain)))
-        var_grad_losses["model"] = energy_difference(inp, base, target, flow)
-    return total_loss, losses, var_grad_losses
-
-
-def batch_loss(
-    key: KeyArray,
-    base: DensityModel,
-    target: DensityModel,
-    flow: Transform[AugmentedData, State],
-    weight_nll: float,
-    weight_fm: float,
-    weight_fe: float,
-    weight_vg_model: float,
-    weight_vg_target: float,
-    fm_aggregation: str | None,
-    num_samples: int,
-):
-    total_loss, losses, var_grad_losses = jax.vmap(
-        partial(
-            per_sample_loss,
-            base=base,
-            target=target,
-            flow=flow,
-            weight_nll=weight_nll,
-            weight_fm=weight_fm,
-            weight_fe=weight_fe,
-            weight_vg_model=weight_vg_model,
-            weight_vg_target=weight_vg_target,
-            fm_aggregation=fm_aggregation,
-        )
-    )(jax.random.split(key, num_samples))
-    losses = jax.tree_map(jnp.mean, losses)
-    total_loss_agg = jnp.mean(total_loss)
-
-    for weight, loss_type in zip(
-        (weight_vg_model, weight_vg_target), ("model", "target")
-    ):
-        if weight > 0.0 and loss_type in var_grad_losses:
-            var_grad_loss = var_grad_losses[loss_type]
-            var_grad_loss_agg = 0.5 * jnp.var(var_grad_loss)
-            total_loss_agg += weight * var_grad_loss_agg
-            losses["vargrad_" + loss_type] = var_grad_loss_agg
-    return total_loss_agg, losses
 
 
 def get_scheduler(specs: TrainingSpecification):
@@ -193,71 +60,243 @@ def get_scheduler(specs: TrainingSpecification):
     return scheduler
 
 
+LossFun = Callable[[Transform[AugmentedData, State]], Array]
+LossFunFactory = Callable[[KeyArray], LossFun]
+TotLossFun = Callable[[Transform[AugmentedData, State]], tuple[Array, dict]]
+
+
+def force_matching_loss_fn(
+    key: KeyArray,
+    base: Potential[State],
+    source: Sampler[AugmentedData],
+    omm_energy_model: OpenMMEnergyModel,
+    num_samples: int,
+    perturbation_noise: float,
+) -> LossFun:
+    chain = key_chain(key)
+    keys = jax.random.split(next(chain), num_samples)
+    samples = jax.vmap(source)(keys).obj
+    if perturbation_noise > 0:
+        samples = lenses.bind(samples).pos.set(
+            samples.pos
+            + perturbation_noise
+            * jax.random.normal(next(chain), samples.pos.shape)
+        )
+    _, omm_forces = wrap_openmm_model(omm_energy_model)[1](
+        samples.pos, None, True
+    )
+
+    def evaluate(flow: Transform[AugmentedData, State]) -> Array:
+        flow_grads = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(
+            samples
+        )
+        mse = 0
+        mse += jnp.mean(jnp.square(-flow_grads.pos - omm_forces))
+        mse += jnp.mean(jnp.square(flow_grads.aux - samples.aux))
+        mse += jnp.mean(jnp.square(flow_grads.com - samples.com))
+        return mse
+
+    return evaluate
+
+
+def kullback_leiber_divergence_fn(
+    key: KeyArray,
+    base: DensityModel[State],
+    target: DensityModel[AugmentedData],
+    num_samples: int,
+    reverse: bool,
+) -> LossFun:
+    keys = jax.random.split(key, num_samples)
+
+    def evaluate(flow: Transform[AugmentedData, State]) -> Array:
+        if not reverse:
+            out = jax.vmap(PushforwardSampler(target.sample, flow))(keys)
+            return jnp.mean(jax.vmap(base.potential)(out.obj) - out.ldj)
+        else:
+            out = jax.vmap(PullbackSampler(base.sample, flow))(keys)
+            return jnp.mean(jax.vmap(target.potential)(out.obj) - out.ldj)
+
+    return evaluate
+
+
+def var_grad_loss_fn(
+    key: KeyArray,
+    sampler: Sampler[AugmentedData],
+    base: Potential[State],
+    target: Potential[AugmentedData],
+    num_samples: int,
+) -> LossFun:
+
+    keys = jax.random.split(key, num_samples)
+
+    samples = jax.lax.stop_gradient(jax.vmap(sampler)(keys).obj)
+
+    def evaluate(flow: Transform[AugmentedData, State]) -> Array:
+        flow_energies = jax.vmap(PushforwardPotential(base, flow))(samples)
+        target_energies = jax.vmap(target)(samples)
+        return jnp.var(flow_energies - target_energies)
+
+    return evaluate
+
+
 @pytree_dataclass(frozen=True)
-class Trainer:
-    optim: GradientTransformation
-    base: DensityModel
-    target: DensityModel
-    weight_nll: float
-    weight_fm: float
-    weight_fe: float
-    weight_vg_model: float
-    weight_vg_target: float
-    fm_aggregation: str | None
-    num_samples: int
+class Loss:
+    label: str
+    loss_fn: LossFun
+    weight: float
 
-    def init(
-        self,
-        key: KeyArray,
-        flow: Flow,
-    ):
-        params, static = eqx.partition(flow, eqx.is_array)  # type: ignore
-        opt_state = self.optim.init(params)
-        return opt_state
 
-    # jax.value_and_grad()
-    def step(
-        self,
-        key: KeyArray,
-        flow: Flow,
+def total_loss_fn(losses: Iterable[Loss]) -> TotLossFun:
+    def evaluate(flow: Transform[AugmentedData, State]) -> tuple[Array, dict]:
+        report = {}
+        tot_loss = jnp.zeros(())
+        for loss in losses:
+            loss_value = loss.loss_fn(flow)
+            tot_loss += loss.weight * loss_value
+            report[loss.label] = loss_value
+        return tot_loss, report
+
+    return evaluate
+
+
+def update_fn(
+    optim: GradientTransformation,
+    loss_fn: TotLossFun,
+):
+    def update(
+        flow: Transform[AugmentedData, State],
         opt_state: OptState,
     ):
-        (loss, losses), grad = eqx.filter_value_and_grad(
-            lambda flow: batch_loss(
-                key=key,
-                flow=flow,
-                base=self.base,
-                target=self.target,
-                num_samples=self.num_samples,
-                weight_nll=self.weight_nll,
-                weight_fm=self.weight_fm,
-                weight_fe=self.weight_fe,
-                weight_vg_model=self.weight_vg_model,
-                weight_vg_target=self.weight_vg_target,
-                fm_aggregation=self.fm_aggregation,
-            ),
-            has_aux=True,
-        )(flow)
-        updates, opt_state = self.optim.update(grad, opt_state)
-        flow = cast(Flow, eqx.apply_updates(flow, updates))
-        return loss, flow, opt_state, losses
-
-    @staticmethod
-    def from_specs(
-        base: DensityModel, target: DensityModel, specs: TrainingSpecification
-    ):
-        return Trainer(
-            optax.adam(get_scheduler(specs)),
-            base,
-            target,
-            specs.weight_nll,
-            specs.weight_fm,
-            specs.weight_fe,
-            specs.weight_vg_model,
-            specs.weight_vg_target,
-            specs.fm_aggregation,
-            specs.num_samples,
+        (loss, report), grad = eqx.filter_value_and_grad(loss_fn, has_aux=True)(
+            flow
         )
+        params = eqx.filter(flow, eqx.is_array)
+        updates, opt_state = optim.update(grad, opt_state, params)  # type: ignore
+        flow = cast(
+            Transform[AugmentedData, State], eqx.apply_updates(flow, updates)
+        )
+        return loss, flow, opt_state, report
+
+    return update
+
+
+def train_fn(
+    flow: Transform[AugmentedData, State],
+    base: BaseDensity,
+    target: TargetDensity,
+    specs: TrainingSpecification,
+):
+    params = eqx.filter(flow, eqx.is_array)
+    optim = optax.adam(get_scheduler(specs))
+    optim = optax.apply_if_finite(optim, 10)
+    if specs.use_grad_clipping:
+        optim = optax.adaptive_grad_clip(specs.grad_clipping_ratio)
+
+    opt_state = optim.init(params)  # type: ignore
+
+    def init_losses(
+        key: KeyArray,
+        flow: Transform[AugmentedData, State],
+    ) -> TotLossFun:
+        chain = key_chain(key)
+        partial_loss_fns = []
+        if specs.weight_fe > 0:
+            partial_loss_fns.append(
+                Loss(
+                    "reverse_kl",
+                    kullback_leiber_divergence_fn(
+                        key=next(chain),
+                        base=base,
+                        target=target,
+                        num_samples=specs.num_samples,
+                        reverse=True,
+                    ),
+                    specs.weight_fe,
+                )
+            )
+        if specs.weight_nll > 0:
+            partial_loss_fns.append(
+                Loss(
+                    "neg_log_likelihood",
+                    kullback_leiber_divergence_fn(
+                        key=next(chain),
+                        base=base,
+                        target=target,
+                        num_samples=specs.num_samples,
+                        reverse=False,
+                    ),
+                    specs.weight_nll,
+                )
+            )
+        if specs.weight_fm_model > 0:
+            partial_loss_fns.append(
+                Loss(
+                    "force_matching_model_samples",
+                    force_matching_loss_fn(
+                        key=next(chain),
+                        base=base.potential,
+                        source=PullbackSampler(base.sample, flow),
+                        omm_energy_model=target.model,
+                        num_samples=specs.num_samples,
+                        perturbation_noise=specs.fm_model_perturbation_noise,
+                    ),
+                    specs.weight_nll,
+                )
+            )
+        if specs.weight_fm_target > 0:
+            partial_loss_fns.append(
+                Loss(
+                    "force_matching_target_samples",
+                    force_matching_loss_fn(
+                        key=next(chain),
+                        base=base.potential,
+                        source=target.sample,
+                        omm_energy_model=target.model,
+                        num_samples=specs.num_samples,
+                        perturbation_noise=specs.fm_target_perturbation_noise,
+                    ),
+                    specs.weight_nll,
+                )
+            )
+        if specs.weight_vg_model > 0:
+            partial_loss_fns.append(
+                Loss(
+                    "var_grad_model_samples",
+                    var_grad_loss_fn(
+                        key=next(chain),
+                        sampler=PullbackSampler(base.sample, flow),
+                        target=target.potential,
+                        base=base.potential,
+                        num_samples=specs.num_samples,
+                    ),
+                    specs.weight_vg_model,
+                )
+            )
+        if specs.weight_vg_target > 0:
+            partial_loss_fns.append(
+                Loss(
+                    "var_grad_target_samples",
+                    var_grad_loss_fn(
+                        key=next(chain),
+                        sampler=target.sample,
+                        target=target.potential,
+                        base=base.potential,
+                        num_samples=specs.num_samples,
+                    ),
+                    specs.weight_vg_model,
+                )
+            )
+        return total_loss_fn(partial_loss_fns)
+
+    def train_step(
+        key: KeyArray,
+        flow: Transform[AugmentedData, State],
+        opt_state: OptState,
+    ):
+        loss_fn = init_losses(key, flow)
+        return update_fn(optim, loss_fn)(flow, opt_state)
+
+    return opt_state, train_step
 
 
 def run_training_stage(
@@ -266,40 +305,49 @@ def run_training_stage(
     target: TargetDensity,
     flow: Flow,
     training_specs: TrainingSpecification,
+    system_specs: SystemSpecification,
     reporter: Reporter,
     tot_iter: int,
 ):
 
     chain = key_chain(key)
     scheduler = get_scheduler(training_specs)
-    trainer = Trainer.from_specs(base, target, training_specs)
 
-    opt_state = trainer.init(next(chain), flow)
+    opt_state, train_step = train_fn(flow, base, target, training_specs)
 
-    with jit_and_cleanup_cache(trainer.step) as step:
+    with jit_and_cleanup_cache(train_step) as step:
         for num_epoch in range(training_specs.num_epochs):
+
+            target.model.set_softcore_cutoff(
+                system_specs.softcore_cutoff,
+                system_specs.softcore_potential,
+                system_specs.softcore_slope,
+            )
+
             epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
             pbar = tqdm(
                 range(training_specs.num_iters_per_epoch),
                 desc=f"Epoch: {num_epoch}",
             )
+
             for _ in pbar:
-                loss, flow, opt_state, other_losses = step(
+                loss, flow, opt_state, report = step(
                     next(chain), flow, opt_state
                 )
                 tf.summary.scalar(
-                    f"{reporter.scope}/loss/total", loss, tot_iter
+                    f"loss/total/{reporter.scope}", loss, tot_iter
                 )
-                for name, val in other_losses.items():
-                    tf.summary.scalar(
-                        f"loss/{name}", val, tot_iter
-                    )
+                for name, val in report.items():
+                    tf.summary.scalar(f"loss/{name}", val, tot_iter)
 
                 tf.summary.scalar(
-                    f"{reporter.scope}/learning_rate",
+                    f"learning_rate/{reporter.scope}",
                     scheduler(tot_iter),
                     tot_iter,
                 )
                 tot_iter += 1
+
+            target.model.set_softcore_cutoff(None)
+
             epoch_reporter.report_model(next(chain), flow, tot_iter)
     return flow

@@ -76,7 +76,7 @@ class OpenMMEnergyModel:
     def set_softcore_cutoff(
         self,
         cutoff: float | None,
-        type: str = "",
+        type: str | None = None,
         slope: float | None = None,
     ):
         """

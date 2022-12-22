@@ -125,9 +125,9 @@ class SystemSpecification:
     forces_path: str | None
     fixed_box: bool
 
-    softcore_cutoff: float
-    softcore_potential: str
-    softcore_slope: float
+    softcore_cutoff: float | None
+    softcore_potential: str | None
+    softcore_slope: float | None
 
     water_type: str = "tip4pew"
 

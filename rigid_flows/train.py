@@ -87,12 +87,13 @@ def force_matching_loss_fn(
     _, omm_forces = wrap_openmm_model(omm_energy_model)[1](
         samples.pos, None, True
     )
+
+    num_atoms = prod(samples.pos.shape[1:])
     if ignore_charge_site:
-        num_atoms = prod(samples.pos.shape[1:])
         mask = (jnp.arange(num_atoms) % 4) != 3
         mask = jnp.tile(mask[None], (num_samples, 1))
     else:
-        mask = jnp.ones((num_samples, -1))
+        mask = jnp.ones((num_samples, num_atoms))
 
     def evaluate(flow: Transform[AugmentedData, State]) -> Array:
         flow_grads = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(

@@ -5,6 +5,10 @@ import shutil
 from dataclasses import asdict
 from typing import cast
 
+from jax.config import config
+
+config.update("jax_enable_x64", True)
+
 import equinox as eqx
 import git
 import jax

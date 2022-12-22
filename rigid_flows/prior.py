@@ -8,11 +8,11 @@ import numpy as np
 import tensorflow_probability.substrates.jax as tfp  # type: ignore
 from jax import Array
 
-from experiments.rigid_flows.rigid_flows.system import SimulationBox
 from flox import geom
 from flox._src.flow import Transformed, rigid
 
 from .data import Data
+from .system import SimulationBox
 
 KeyArray = jax.random.PRNGKeyArray | jnp.ndarray
 

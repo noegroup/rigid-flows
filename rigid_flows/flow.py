@@ -14,23 +14,13 @@ from jaxtyping import Float
 from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.impl import Affine
-from flox.flow import (
-    DoubleMoebius,
-    Pipe,
-    Transform,
-    Transformed,
-    VectorizedTransform,
-)
+from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
 from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .lowrank import LowRankFlow
 from .nn import MLPMixer, QuatEncoder
-from .specs import (
-    CouplingSpecification,
-    FlowSpecification,
-    PreprocessingSpecification,
-)
+from .specs import CouplingSpecification, FlowSpecification, PreprocessingSpecification
 from .system import SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
@@ -380,7 +370,7 @@ class QuatUpdate(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         self.net = MLPMixer(
-            num_inp=auxiliary_shape[-1] + num_pos * 2,
+            num_inp=auxiliary_shape[-1] + num_pos, # * 2,
             num_out=4 * 4 + 4,  # num_rot,
             key=key,
             **kwargs,
@@ -397,13 +387,13 @@ class QuatUpdate(eqx.Module):
         """
         aux = input.aux
         pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
-        pos = jnp.concatenate(
-            [
-                jnp.cos(pos),
-                jnp.sin(pos),
-            ],
-            axis=-1,
-        )
+        # pos = jnp.concatenate(
+        #     [
+        #         jnp.cos(pos),
+        #         jnp.sin(pos),
+        #     ],
+        #     axis=-1,
+        # )
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (pos.shape[0], 1))
         feats = jnp.concatenate([aux, pos], axis=-1)
@@ -488,7 +478,7 @@ class AuxUpdate(eqx.Module):
         self.transform = transform
         num_out = (2 + 2 * num_low_rank) * auxiliary_shape[-1]
         self.net = MLPMixer(
-            num_inp=num_dims + 2 * num_pos,
+            num_inp=num_dims + num_pos, # * 2,
             num_out=num_out,
             key=next(chain),
             **kwargs,
@@ -505,13 +495,13 @@ class AuxUpdate(eqx.Module):
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
         pos = input.pos - jnp.mean(input.pos, axis=(0, 1))
-        pos = jnp.concatenate(
-            [
-                jnp.cos(pos),
-                jnp.sin(pos),
-            ],
-            axis=-1,
-        )
+        # pos = jnp.concatenate(
+        #     [
+        #         jnp.cos(pos),
+        #         jnp.sin(pos),
+        #     ],
+        #     axis=-1,
+        # )
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
         out = self.net(feats).reshape(input.aux.shape[0], -1)
 

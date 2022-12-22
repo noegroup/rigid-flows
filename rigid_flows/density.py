@@ -314,7 +314,7 @@ class TargetDensity(DensityModel[AugmentedData]):
             aux = self.aux_model.sample(seed=next(chain))
             com = self.com_model.sample(seed=next(chain))
 
-            pos = pos - pos.mean(axis=(0, 1))
+            # pos = pos - pos.mean(axis=(0, 1))
 
             if self.data.force is not None:
                 force = self.data.force[idx]

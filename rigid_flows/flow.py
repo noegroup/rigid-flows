@@ -835,7 +835,7 @@ def _coupling(
         sub_block = Pipe(
             [
                 *aux_block,
-                *pos_block,
+                # *pos_block,
                 QuatUpdate(
                     auxiliary_shape=auxiliary_shape,
                     **asdict(specs.quaternion_update),

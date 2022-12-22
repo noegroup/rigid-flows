@@ -11,12 +11,7 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import (
-    GradientTransformation,
-    OptState,
-    huber_loss,
-    safe_root_mean_squares,
-)
+from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
 from tqdm import tqdm
 
 from flox._src.flow.potential import Potential, PushforwardPotential

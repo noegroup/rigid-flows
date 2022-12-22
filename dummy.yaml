@@ -6,10 +6,10 @@ global_step: 0
 act_norm_init_samples: 128
 
 reporting:
-  num_samples: 1
-  num_samples_per_batch: 1
+  num_samples: 1000
+  num_samples_per_batch: 1000
   plot_quaternions: null # [1, 5] 
-  plot_oxygens: false
+  plot_oxygens: true
   plot_energy_histograms: false
   report_ess: false
   report_likelihood: false 
@@ -108,7 +108,7 @@ system:
 train:
 
   # first stage: only likelihood
-  - num_epochs: 2
+  - num_epochs: 0
     num_iters_per_epoch: 1000
 
     init_learning_rate: 1e-3

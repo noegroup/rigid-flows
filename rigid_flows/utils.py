@@ -123,7 +123,7 @@ def scanned_vmap(
             scanned_arg = scanned_arg.reshape(
                 *shape[:ax], num_batches, batch_size, *shape[ax + 1 :]
             )
-            scanned_arg = jnp.swapaxes(scanned_arg, 0, ax)
+            scanned_arg = jnp.swapaxes(scanned_arg, 0, ax)  # type: ignore
             return scanned_arg
 
         def slice_off_leftover(arg, ax, num_batches, batch_size):

@@ -26,6 +26,7 @@ from flox._src.util.misc import unpack
 from .data import AugmentedData
 from .density import BaseDensity, KeyArray, TargetDensity
 from .flow import InitialTransform, State
+from .prior import PositionPrior
 from .specs import ReportingSpecifications
 from .system import OpenMMEnergyModel, SimulationBox
 from .utils import jit_and_cleanup_cache, scanned_vmap
@@ -96,6 +97,16 @@ def plot_quaternions(
     plt.suptitle(
         f"2D projections of quaternions {', '.join(map(str, quat_idxs))}"
     )
+
+    def normalize_quats(quats, ref):
+        sign = jnp.sign(jnp.sum(quats * ref[None], axis=-1))
+        quats = quats * sign[:, :, None]
+        return quats
+
+    ref = data[0]
+    data = normalize_quats(data, ref)
+    samples = normalize_quats(samples, ref)
+    prior = normalize_quats(prior, ref)
 
     fig = plt.figure(figsize=(6 * 2, len(quat_idxs) * 2 + 0.8))
     for i, (j, k) in it.product(quat_idxs, it.combinations(range(4), 2)):
@@ -396,6 +407,7 @@ class Reporter:
     run_dir: str
     specs: ReportingSpecifications
     scope: str | None
+    pos_prior: PositionPrior
 
     def report_model(
         self,
@@ -412,6 +424,7 @@ class Reporter:
             self.run_dir,
             self.scope if self.scope else "",
             self.specs,
+            self.pos_prior,
         )
 
     def with_scope(self, scope) -> "Reporter":
@@ -421,6 +434,7 @@ class Reporter:
             self.run_dir,
             self.specs,
             self.scope + "/" + scope if self.scope else scope,
+            self.pos_prior,
         )
 
 
@@ -433,6 +447,7 @@ def report_model(
     run_dir: str,
     scope: str,
     specs: ReportingSpecifications,
+    pos_prior: PositionPrior,
 ):
     chain = key_chain(key)
 
@@ -502,10 +517,10 @@ def report_model(
 
     # plot quaternion histograms
     if specs.plot_quaternions is not None:
-        data_quats = jax.vmap(InitialTransform().forward)(
+        data_quats = jax.vmap(InitialTransform(pos_prior).forward)(
             data_samples.obj
         ).obj.rot
-        model_quats = jax.vmap(InitialTransform().forward)(
+        model_quats = jax.vmap(InitialTransform(pos_prior).forward)(
             model_samples.obj
         ).obj.rot
         prior_quats = prior_samples.obj.rot

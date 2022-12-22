@@ -26,6 +26,7 @@ from flox.util import key_chain, unpack
 from .data import AugmentedData
 from .lowrank import LowRankFlow
 from .nn import MLPMixer, QuatEncoder
+from .prior import PositionPrior
 from .specs import (
     CouplingSpecification,
     FlowSpecification,
@@ -726,23 +727,35 @@ class PositionEncoder(eqx.Module):
 class InitialTransform:
     """Initial transform, transforming data into a state."""
 
+    prior: PositionPrior
+
     def forward(self, input: AugmentedData) -> Transformed[State]:
-        rigid, ldj = unpack(
+        rigid, ldj1 = unpack(
             VectorizedTransform(RigidTransform()).forward(input.pos)
         )
         rigid = lenses.bind(rigid).rot.set(rigid.rot * input.sign)
         # pos = rigid.pos + input.com
         pos = rigid.pos
+
+        pos, ldj0 = unpack(self.prior.forward(pos))
+
+        ldj = ldj0 + ldj1
+
         state = State(rigid.rot, pos, rigid.ics, input.aux, input.box)
         return Transformed(state, ldj)
 
     def inverse(self, input: State) -> Transformed[AugmentedData]:
-        rigid = jax.vmap(RigidRepresentation)(input.rot, input.pos)
-        pos, ldj = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))
+
+        pos, ldj0 = unpack(self.prior.inverse(input.pos))
+
+        rigid = jax.vmap(RigidRepresentation)(input.rot, pos)
+        pos, ldj1 = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))
         sign = jnp.sign(input.rot[:, (0,)])
 
+        ldj = ldj0 + ldj1
+
         com = jnp.mean(pos, axis=(0, 1))
-        # pos = pos - com[None, None]
+
         data = AugmentedData(pos, com, input.aux, sign, input.box)
         return Transformed(data, ldj)
 
@@ -751,6 +764,7 @@ def _preprocess(
     key: KeyArray,
     auxiliary_shape: tuple[int, ...],
     specs: PreprocessingSpecification,
+    prior: PositionPrior,
 ) -> Transform[AugmentedData, State]:
     """The initial blocks handing:
 
@@ -785,7 +799,7 @@ def _preprocess(
         aux_block += [ActNorm(lenses.lens.aux)]
     return Pipe(
         [
-            InitialTransform(),
+            InitialTransform(prior=prior),
             # *aux_block,
             # *pos_block,
         ]
@@ -851,6 +865,7 @@ def build_flow(
     key: KeyArray,
     auxiliary_shape: tuple[int, ...],
     specs: FlowSpecification,
+    prior: PositionPrior,
 ) -> Pipe[AugmentedData, State]:
     """Creates the final flow composed of:
 
@@ -873,7 +888,9 @@ def build_flow(
     couplings = LayerStackedPipe(blocks, use_scan=False)
     return Pipe[AugmentedData, State](
         [
-            _preprocess(next(chain), auxiliary_shape, specs.preprocessing),
+            _preprocess(
+                next(chain), auxiliary_shape, specs.preprocessing, prior=prior
+            ),
             couplings,
         ]
     )

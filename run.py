@@ -14,6 +14,7 @@ from rigid_flows.density import (
     BaseDensity,
     KeyArray,
     PositionPrior,
+    RotationPrior,
     TargetDensity,
 )
 from rigid_flows.flow import (
@@ -59,18 +60,23 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
 
     logging.info(f"Setting up base density.")
     assert target.data is not None
-    prior = PositionPrior(target.data)
+    pos_prior = PositionPrior(target.data)
+    rot_prior = RotationPrior(target.data)
     base = BaseDensity.from_specs(
         specs.system,
         specs.model.base,
-        prior,
+        pos_prior,
+        rot_prior,
         target.box,
         specs.model.auxiliary_shape,
     )
 
     logging.info(f"Setting up flow model.")
     flow = build_flow(
-        next(chain), specs.model.auxiliary_shape, specs.model.flow
+        next(chain),
+        specs.model.auxiliary_shape,
+        specs.model.flow,
+        prior=pos_prior,
     )
 
     logging.info(f"Initializing ActNorm")
@@ -119,7 +125,14 @@ def train(
     log["git"] = {"branch": branch, "sha": sha}
     tf.summary.text("run_params", pretty_json(log), step=tot_iter)
     logging.info(f"Starting training.")
-    reporter = Reporter(base, target, run_dir, specs.reporting, scope=None)
+    reporter = Reporter(
+        base,
+        target,
+        run_dir,
+        specs.reporting,
+        scope=None,
+        pos_prior=target.prior,
+    )
     reporter.with_scope(f"initial").report_model(next(chain), flow, tot_iter)
     for stage, train_spec in enumerate(specs.train):
         flow = run_training_stage(

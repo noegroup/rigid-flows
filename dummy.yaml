@@ -8,7 +8,7 @@ act_norm_init_samples: 128
 reporting:
   num_samples: 1000
   num_samples_per_batch: 1000
-  plot_quaternions: null # [1, 5] 
+  plot_quaternions: [1, 3, 5, 7, 9, 11] 
   plot_oxygens: true
   plot_energy_histograms: false
   report_ess: false

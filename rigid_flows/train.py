@@ -1,7 +1,7 @@
 from functools import partial
 from itertools import accumulate
 from math import prod
-from typing import Callable, Iterable, cast
+from typing import Any, Callable, Iterable, cast
 
 import equinox as eqx
 import jax
@@ -11,9 +11,15 @@ import tensorflow as tf  # type: ignore
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-from optax import GradientTransformation, OptState, huber_loss, safe_root_mean_squares
+from optax import (
+    GradientTransformation,
+    OptState,
+    huber_loss,
+    safe_root_mean_squares,
+)
 from tqdm import tqdm
 
+from flox._src.flow.api import Pipe
 from flox._src.flow.potential import Potential, PushforwardPotential
 from flox._src.flow.sampling import PushforwardSampler, Sampler
 from flox.flow import PullbackSampler, Transform
@@ -21,7 +27,7 @@ from flox.util import key_chain, unpack
 
 from .data import AugmentedData
 from .density import BaseDensity, DensityModel, TargetDensity
-from .flow import State
+from .flow import InitialTransform, State
 from .reporting import Reporter
 from .specs import SystemSpecification, TrainingSpecification
 from .system import OpenMMEnergyModel, wrap_openmm_model
@@ -183,6 +189,11 @@ def update_fn(
             flow
         )
         params = eqx.filter(flow, eqx.is_array)
+        grad = jax.tree_map(
+            lambda node: jax.tree_map(lambda x: jnp.zeros_like(x), node),
+            grad,
+            is_leaf=lambda node: isinstance(node, InitialTransform),
+        )
         updates, opt_state = optim.update(grad, opt_state, params)  # type: ignore
         flow = cast(
             Transform[AugmentedData, State], eqx.apply_updates(flow, updates)

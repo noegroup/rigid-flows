@@ -1,4 +1,4 @@
-from dataclasses import asdict, astuple
+from dataclasses import asdict, astuple, dataclass
 from functools import partial, reduce
 from turtle import forward
 from typing import Any, cast

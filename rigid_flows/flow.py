@@ -12,7 +12,6 @@ from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 from jaxtyping import Float
 
-from experiments.rigid_flows.rigid_flows.density import OpenMMDensity
 from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.impl import Affine
@@ -26,6 +25,7 @@ from flox.flow import (
 from flox.util import key_chain, unpack
 
 from .data import DataWithAuxiliary
+from .density import OpenMMDensity
 from .lowrank import LowRankFlow
 from .nn import MLPMixer, QuatEncoder
 from .prior import PositionPrior, RotationPrior

@@ -23,10 +23,9 @@ from flox._src.flow.sampling import Sampler
 from flox._src.util.jax import key_chain
 from flox._src.util.misc import unpack
 
-from .data import AugmentedData
-from .density import BaseDensity, KeyArray, TargetDensity
-from .flow import InitialTransform, State
-from .prior import PositionPrior, RotationPrior
+from .data import DataWithAuxiliary
+from .density import KeyArray, OpenMMDensity
+from .flow import EuclideanToRigidTransform, RigidWithAuxiliary
 from .specs import ReportingSpecifications
 from .system import OpenMMEnergyModel, SimulationBox
 from .utils import jit_and_cleanup_cache, scanned_vmap
@@ -206,14 +205,6 @@ def write_figure_to_tensorboard(label: str, fig: Figure, num_iter: int):
     return buf
 
 
-def compute_energies(
-    pos: np.ndarray, box: SimulationBox, model: OpenMMEnergyModel
-):
-    return model.compute_energies_and_forces(
-        pos.reshape(pos.shape[0], -1, 3), np.diag(box.size)
-    )
-
-
 def plot_energy_histogram(
     label: str,
     energies_data: np.ndarray,
@@ -287,6 +278,7 @@ class SamplingStatistics:
 
     omm_energies: np.ndarray
     aux_energies: np.ndarray
+    com_energies: np.ndarray
     model_energies: np.ndarray
 
     ess: float
@@ -325,8 +317,10 @@ def batched_sampler(
 
 
 def sample_from_model(
-    key: KeyArray, base: BaseDensity, flow: Transform[AugmentedData, State]
-) -> Transformed[AugmentedData]:
+    key: KeyArray,
+    base: OpenMMDensity,
+    flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
+) -> Transformed[DataWithAuxiliary]:
     latent = base.sample(key)
     sample = bind(latent, Inverted(flow))
     return sample
@@ -334,54 +328,68 @@ def sample_from_model(
 
 def sample_from_target(
     key: KeyArray,
-    target: TargetDensity,
-) -> Transformed[AugmentedData]:
+    target: OpenMMDensity,
+) -> Transformed[DataWithAuxiliary]:
     out = target.sample(key)
     return out
 
 
-def sample_from_base(key: KeyArray, base: BaseDensity) -> Transformed[State]:
+def sample_from_base(
+    key: KeyArray, base: OpenMMDensity
+) -> Transformed[DataWithAuxiliary]:
     return base.sample(key)
 
 
 def compute_model_likelihood(
-    samples: Transformed[AugmentedData],
-    flow: Transform[AugmentedData, State],
-    base: BaseDensity,
+    samples: Transformed[DataWithAuxiliary],
+    flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
+    base: OpenMMDensity,
 ):
     latent, ldj = unpack(flow.forward(samples.obj))
     return base.potential(latent) - ldj
 
 
 def compute_sample_energies(
-    samples: Transformed[AugmentedData],
-    target: TargetDensity,
+    samples: Transformed[DataWithAuxiliary],
+    target: OpenMMDensity,
 ):
-    aux_energies = -target.aux_model.log_prob(samples.obj.aux)
-    aux_energies = aux_energies.reshape(aux_energies.shape[0], -1).sum(axis=-1)
 
-    sample_positions = np.array(samples.obj.pos).reshape(
-        samples.obj.pos.shape[0], -1, 3
+    energies = target.compute_energies(
+        samples.obj, omm=True, aux=True, com=True, has_batch_dim=True
     )
-    box = np.diag(samples.obj.box.size[0])
-    omm_energies, _ = target.model.compute_energies_and_forces(
-        sample_positions, box
-    )
-    target_energies = omm_energies + aux_energies
-    return omm_energies, aux_energies
+
+    aux_energies = energies["aux"]
+    # aux_energies = -target.aux_model.log_prob(samples.obj.aux)
+    # aux_energies = aux_energies.reshape(aux_energies.shape[0], -1).sum(axis=-1)
+
+    # sample_positions = np.array(samples.obj.pos).reshape(
+    #     samples.obj.pos.shape[0], -1, 3
+    # )
+    # box = np.diag(samples.obj.box.size[0])
+    # omm_energies, _ = target.omm_model.compute_energies_and_forces(
+    #     sample_positions, box
+    # )
+    omm_energies = energies["omm"]
+    com_energies = energies["com"]
+    # target_energies = omm_energies + aux_energies
+
+    return omm_energies, aux_energies, com_energies
 
 
 def compute_sampling_statistics(
-    samples: Transformed[AugmentedData],
-    target: TargetDensity,
+    samples: Transformed[DataWithAuxiliary],
+    target: OpenMMDensity,
 ) -> SamplingStatistics:
 
-    omm_energies, aux_energies = compute_sample_energies(samples, target)
+    omm_energies, aux_energies, com_energies = compute_sample_energies(
+        samples, target
+    )
 
     model_energies = np.array(samples.ldj)
 
-    target_energies = omm_energies + aux_energies
-    weights = compute_stable_weights(model_energies - target_energies)
+    target_energies = omm_energies + aux_energies + com_energies
+    # weights = compute_stable_weights(model_energies - target_energies)
+    weights = jax.nn.softmax(model_energies - target_energies)
 
     ess = np.square(np.sum(weights)) / np.sum(np.square(weights))
 
@@ -390,6 +398,7 @@ def compute_sampling_statistics(
         omm_energies=np.array(omm_energies),
         aux_energies=np.array(aux_energies),
         model_energies=np.array(model_energies),
+        com_energies=np.array(com_energies),
         ess=float(ess),
         num=len(omm_energies),
     )
@@ -402,18 +411,16 @@ def save_summary(path: str, data: Any):
 @pytree_dataclass(frozen=True)
 class Reporter:
 
-    base: BaseDensity
-    target: TargetDensity
+    base: OpenMMDensity
+    target: OpenMMDensity
     run_dir: str
     specs: ReportingSpecifications
     scope: str | None
-    pos_prior: PositionPrior
-    rot_prior: RotationPrior
 
     def report_model(
         self,
         key: KeyArray,
-        flow: Transform[AugmentedData, State],
+        flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
         num_iter: int,
     ):
         return report_model(
@@ -425,8 +432,6 @@ class Reporter:
             self.run_dir,
             self.scope if self.scope else "",
             self.specs,
-            self.pos_prior,
-            self.rot_prior,
         )
 
     def with_scope(self, scope) -> "Reporter":
@@ -436,26 +441,20 @@ class Reporter:
             self.run_dir,
             self.specs,
             self.scope + "/" + scope if self.scope else scope,
-            self.pos_prior,
-            self.rot_prior,
         )
 
 
 def report_model(
     key: KeyArray,
-    flow: Transform[AugmentedData, State],
-    base: BaseDensity,
-    target: TargetDensity,
+    flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
+    base: OpenMMDensity,
+    target: OpenMMDensity,
     tot_iter: int,
     run_dir: str,
     scope: str,
     specs: ReportingSpecifications,
-    pos_prior: PositionPrior,
-    rot_prior: RotationPrior,
 ):
     chain = key_chain(key)
-
-    logger = logging.getLogger("main")
 
     logging.info("preparing report")
 
@@ -466,7 +465,7 @@ def report_model(
             specs.num_samples_per_batch,
         )
     ) as sample:
-        data_samples: Transformed[AugmentedData] = sample(
+        data_samples: Transformed[DataWithAuxiliary] = sample(
             jax.random.split(next(chain), specs.num_samples)
         )
     assert data_samples is not None
@@ -478,7 +477,7 @@ def report_model(
             specs.num_samples_per_batch,
         )
     ) as sample:
-        prior_samples: Transformed[State] = sample(
+        prior_samples: Transformed[DataWithAuxiliary] = sample(
             jax.random.split(next(chain), specs.num_samples)
         )
     assert prior_samples is not None
@@ -490,7 +489,7 @@ def report_model(
             specs.num_samples_per_batch,
         )
     ) as sample:
-        model_samples: Transformed[AugmentedData] = sample(
+        model_samples: Transformed[DataWithAuxiliary] = sample(
             jax.random.split(next(chain), specs.num_samples)
         )
     assert model_samples is not None
@@ -521,13 +520,19 @@ def report_model(
 
     # plot quaternion histograms
     if specs.plot_quaternions is not None:
-        data_quats = jax.vmap(InitialTransform(pos_prior, rot_prior).forward)(
-            data_samples.obj
-        ).obj.rot
-        model_quats = jax.vmap(InitialTransform(pos_prior, rot_prior).forward)(
-            model_samples.obj
-        ).obj.rot
-        prior_quats = prior_samples.obj.rot
+        data_quats = jax.vmap(
+            EuclideanToRigidTransform(
+                target.data.modes, target.data.stds
+            ).forward
+        )(data_samples.obj).obj.rot
+        model_quats = jax.vmap(
+            EuclideanToRigidTransform(
+                target.data.modes, target.data.stds
+            ).forward
+        )(model_samples.obj).obj.rot
+        prior_quats = jax.vmap(
+            EuclideanToRigidTransform(base.data.modes, base.data.stds).forward
+        )(prior_samples.obj).obj.rot
         logging.info(f"plotting quaternions")
         fig = plot_quaternions(
             data_quats, model_quats, prior_quats, specs.plot_quaternions
@@ -536,20 +541,11 @@ def report_model(
 
     # plot oxygen histograms
     if specs.plot_oxygens:
-        # data_pos = jax.vmap(InitialTransform().forward)(
-        #     data_samples.obj
-        # ).obj.pos
-        # data_pos = data_pos - data_samples.obj.com[:, None, :
-        data_pos = data_samples.obj.pos.reshape(
-            data_samples.obj.pos.shape[0], -1, 4, 3
-        )[:, :, 0]
-        # model_pos = jax.vmap(InitialTransform().forward)(
-        #     model_samples.obj
-        # ).obj.pos
-        # model_pos = model_pos - model_samples.obj.com[:, None, :]
-        model_pos = model_samples.obj.pos.reshape(
-            model_samples.obj.pos.shape[0], -1, 4, 3
-        )[:, :, 0]
+        data_pos = data_samples.obj.pos[:, :, 0]
+        data_pos = data_pos - jnp.mean(data_pos, axis=(1,), keepdims=True)
+        model_pos = model_samples.obj.pos[:, :, 0]
+        model_pos = model_pos - jnp.mean(model_pos, axis=(1,), keepdims=True)
+
         logging.info(f"plotting oxygens")
         fig = plot_oxygen_positions(model_pos, data_pos, target.box)
         write_figure_to_tensorboard(f"plots/oxygens/{scope}", fig, tot_iter)
@@ -593,7 +589,7 @@ def report_model(
     # plot energy histograms
     if specs.plot_energy_histograms:
         logging.info(f"plotting energy histogram")
-        omm_energies, aux_energies = compute_sample_energies(
+        omm_energies, aux_energies, com_energies = compute_sample_energies(
             data_samples, target
         )
 

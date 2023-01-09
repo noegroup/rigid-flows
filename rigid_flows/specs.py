@@ -82,15 +82,6 @@ class BaseSpecification:
 
 
 @pytree_dataclass(frozen=True)
-class ModelSpecification:
-    auxiliary_shape: tuple[int, ...]
-    flow: FlowSpecification
-    base: BaseSpecification
-    target: TargetSpecification
-    pretrained_model_path: str | None
-
-
-@pytree_dataclass(frozen=True)
 class TrainingSpecification:
     num_epochs: int
     num_iters_per_epoch: int
@@ -142,10 +133,18 @@ class SystemSpecification:
 
 
 @pytree_dataclass(frozen=True)
+class ModelSpecification:
+    auxiliary_shape: tuple[int, ...]
+    flow: FlowSpecification
+    base: SystemSpecification
+    target: SystemSpecification
+    pretrained_model_path: str | None
+
+
+@pytree_dataclass(frozen=True)
 class ExperimentSpecification:
     seed: int
     model: ModelSpecification
-    system: SystemSpecification
     train: tuple[TrainingSpecification]
     reporting: ReportingSpecifications
     global_step: int | None

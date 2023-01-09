@@ -9,16 +9,10 @@ import equinox as eqx
 import git
 import jax
 import tensorflow as tf  # type: ignore
-from rigid_flows.data import AugmentedData
-from rigid_flows.density import (
-    BaseDensity,
-    KeyArray,
-    PositionPrior,
-    RotationPrior,
-    TargetDensity,
-)
+from rigid_flows.data import DataWithAuxiliary
+from rigid_flows.density import KeyArray, OpenMMDensity
 from rigid_flows.flow import (
-    State,
+    RigidWithAuxiliary,
     build_flow,
     initialize_actnorm,
     toggle_layer_stack,
@@ -30,10 +24,6 @@ from rigid_flows.train import run_training_stage
 from flox._src.flow.api import Transform
 from flox.flow import Pipe
 from flox.util import key_chain
-
-# from jax.config import config
-
-# config.update("jax_enable_x64", True)
 
 
 def backup_config_file(run_dir: str, specs_path: str):
@@ -53,22 +43,14 @@ def setup_tensorboard(run_dir: str, label: str):
 def setup_model(key: KeyArray, specs: ExperimentSpecification):
     chain = key_chain(key)
 
-    logging.info(f"Loading target density.")
-    target = TargetDensity.from_specs(
-        specs.model.auxiliary_shape, specs.model.target, specs.system
+    logging.info("Loading base density.")
+    base = OpenMMDensity.from_specs(
+        specs.model.auxiliary_shape, specs.model.base
     )
 
-    logging.info(f"Setting up base density.")
-    assert target.data is not None
-    pos_prior = PositionPrior(target.data)
-    rot_prior = RotationPrior(target.data)
-    base = BaseDensity.from_specs(
-        specs.system,
-        specs.model.base,
-        pos_prior,
-        rot_prior,
-        target.box,
-        specs.model.auxiliary_shape,
+    logging.info(f"Loading target density.")
+    target = OpenMMDensity.from_specs(
+        specs.model.auxiliary_shape, specs.model.target
     )
 
     logging.info(f"Setting up flow model.")
@@ -76,8 +58,8 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
         next(chain),
         specs.model.auxiliary_shape,
         specs.model.flow,
-        pos_prior=pos_prior,
-        rot_prior=rot_prior,
+        base,
+        target,
     )
 
     logging.info(f"Initializing ActNorm")
@@ -99,7 +81,7 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
             f"Loading pre-trained model from {specs.model.pretrained_model_path}."
         )
         flow = cast(
-            Pipe[AugmentedData, State],
+            Pipe[DataWithAuxiliary, RigidWithAuxiliary],
             eqx.tree_deserialise_leaves(
                 specs.model.pretrained_model_path, flow
             ),
@@ -112,11 +94,11 @@ def train(
     key: KeyArray,
     run_dir: str,
     specs: ExperimentSpecification,
-    base: BaseDensity,
-    target: TargetDensity,
-    flow: Transform[AugmentedData, State],
+    base: OpenMMDensity,
+    target: OpenMMDensity,
+    flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
     tot_iter: int,
-) -> Transform[AugmentedData, State]:
+) -> Transform[DataWithAuxiliary, DataWithAuxiliary]:
     chain = key_chain(key)
     repo = git.Repo(search_parent_directories=True)
     branch = repo.active_branch.name
@@ -132,8 +114,6 @@ def train(
         run_dir,
         specs.reporting,
         scope=None,
-        pos_prior=base.pos_prior,
-        rot_prior=base.rot_prior,
     )
     reporter.with_scope(f"initial").report_model(next(chain), flow, tot_iter)
     for stage, train_spec in enumerate(specs.train):
@@ -143,7 +123,7 @@ def train(
             target,
             flow,
             train_spec,
-            specs.system,
+            specs.model.target,
             reporter.with_scope(f"training_stage_{stage}"),
             tot_iter,
         )

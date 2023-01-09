@@ -13,6 +13,7 @@ from flox._src.flow import Transformed, rigid
 
 from .data import Data
 from .system import SimulationBox
+from .utils import smooth_maximum
 
 KeyArray = jax.random.PRNGKeyArray | jnp.ndarray
 
@@ -69,14 +70,6 @@ def mle_vmf_params(q):
     loc, r = mle_loc(q)
     scale = mle_kappa(r, q.shape[-1])
     return loc, scale
-
-
-def smooth_maximum(a, bins=1000, sigma=10000, window=1000):
-    freqs, bins = jnp.histogram(a, bins=bins)
-    gx = np.arange(-4 * sigma, 4 * sigma, window)
-    gaussian = np.exp(-((gx / sigma) ** 2) / 2)
-    freqs = jnp.convolve(freqs, gaussian, mode="same")
-    return bins[jnp.argmax(freqs)]
 
 
 # from tensorflow_probability.substrates import jax as tfp

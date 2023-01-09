@@ -133,6 +133,8 @@ class OpenMMEnergyModel:
             assert box.shape == (3, 3), f"box.shape = {box.shape}"
             self.context.setPeriodicBoxVectors(*box)
 
+        pos = pos.reshape(pos.shape[0], -1, 3)
+
         # iterate over batch dimension
         for i in range(len(pos)):
 

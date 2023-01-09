@@ -6,12 +6,12 @@ global_step: 0
 act_norm_init_samples: 128
 
 reporting:
-  num_samples: 1
-  num_samples_per_batch: 1
-  plot_quaternions: # [1, 3, 5, 7, 9, 11] 
-  plot_oxygens: false
-  plot_energy_histograms: false
-  report_ess: false
+  num_samples: 1000
+  num_samples_per_batch: 1000
+  plot_quaternions: [1, 3, 5, 7, 9, 11] 
+  plot_oxygens: True
+  plot_energy_histograms: True
+  report_ess: True
   report_likelihood: false 
   save_model: false
   save_samples: false
@@ -30,7 +30,7 @@ model:
 
     # initial transform
     preprocessing:
-      act_norm: true
+      act_norm: false
       auxiliary_update:
         seq_len: 16
         activation: gelu
@@ -38,7 +38,7 @@ model:
         num_dims: 64
         expansion_factor: 2
         num_blocks: 1
-        num_low_rank: 2
+        num_low_rank: 0
         low_rank_regularizer: 0.
         transform: gated
       position_encoder:
@@ -51,7 +51,7 @@ model:
 
     # coupling layers
     couplings:
-      - num_repetitions: 1
+      - num_repetitions: 2
         auxiliary_update:
           seq_len: 16
           activation: gelu
@@ -59,7 +59,7 @@ model:
           num_dims: 64
           expansion_factor: 2
           num_blocks: 1
-          num_low_rank: 2
+          num_low_rank: 0
           low_rank_regularizer: 0.
           transform: gated
         position_update:
@@ -69,7 +69,7 @@ model:
           num_dims: 64
           expansion_factor: 2
           num_blocks: 1
-          num_low_rank: 2
+          num_low_rank: 0
           low_rank_regularizer: 0.
           transform: gated
         quaternion_update:
@@ -78,48 +78,53 @@ model:
           expansion_factor: 2
           num_blocks: 1
         act_norm: true
-
-  # base density
+      
   base:
-    rot_concentration: 40
-    pos_concentration: 40
+    path: "/home/jonas/Downloads"
+    num_molecules: 16
+    temperature: 250
+    ice_type: XI
+    water_type: tip4pew-customLJ
+    recompute_forces: false
+    store_forces: false
+    forces_path: null
+    fixed_box: true
 
-  # target density
+    softcore_cutoff: 0.8
+    softcore_potential: linear
+    softcore_slope: 2.
+
   target:
-    cutoff_threshold: null
+    path: "/home/jonas/Downloads"
+    num_molecules: 16
+    temperature: 250
+    ice_type: XI
+    water_type: tip4pew-customLJ
+    recompute_forces: false
+    store_forces: false
+    forces_path: null
+    fixed_box: true
 
-# system definition
-system:
-  path: "/home/jonas/Downloads"
-  num_molecules: 16
-  temperature: 250
-  ice_type: XI
-  water_type: tip4pew-customLJ
-  recompute_forces: false
-  store_forces: false
-  forces_path: null
-  fixed_box: true
-
-  softcore_cutoff: 0.8
-  softcore_potential: "linear"
-  softcore_slope: 2.
+    softcore_cutoff: 0.8
+    softcore_potential: linear
+    softcore_slope: 2.
 
 # training definition
 train:
 
   # first stage: only likelihood
   - num_epochs: 1
-    num_iters_per_epoch: 1
+    num_iters_per_epoch: 100
 
-    init_learning_rate: 1e-3
-    target_learning_rate: 1e-3
+    init_learning_rate: 1e-4
+    target_learning_rate: 1e-4
 
     weight_nll: 1.0
 
     weight_fm_model: 0.
-    fm_model_perturbation_noise: 0.
-    weight_fm_target: 0.01
-    fm_target_perturbation_noise: 0.
+    fm_model_perturbation_noise: 0
+    weight_fm_target: 0
+    fm_target_perturbation_noise: 0
     fm_ignore_charge_site: true
 
     weight_fe: 0.
@@ -129,6 +134,6 @@ train:
     num_samples: 128
 
     use_grad_clipping: false
-    grad_clipping_ratio: 2.
+    grad_clipping_ratio: 1.
 
     apply_if_finite_trials: 100

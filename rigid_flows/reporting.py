@@ -25,9 +25,9 @@ from flox._src.util.misc import unpack
 
 from .data import DataWithAuxiliary
 from .density import KeyArray, OpenMMDensity
-from .flow import EuclideanToRigidTransform, RigidWithAuxiliary
+from .flow import EuclideanToRigidTransform
 from .specs import ReportingSpecifications
-from .system import OpenMMEnergyModel, SimulationBox
+from .system import SimulationBox
 from .utils import jit_and_cleanup_cache, scanned_vmap
 
 

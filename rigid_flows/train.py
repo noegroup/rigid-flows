@@ -13,7 +13,6 @@ from jax_dataclasses import pytree_dataclass
 from optax import GradientTransformation, OptState
 from tqdm import tqdm
 
-from experiments.rigid_flows.rigid_flows.flow import EuclideanToRigidTransform
 from flox._src.flow.potential import Potential
 from flox._src.flow.sampling import PushforwardSampler, Sampler
 from flox.flow import PullbackSampler, Transform
@@ -21,6 +20,7 @@ from flox.util import key_chain
 
 from .data import DataWithAuxiliary
 from .density import DensityModel, OpenMMDensity
+from .flow import EuclideanToRigidTransform
 from .reporting import Reporter
 from .specs import SystemSpecification, TrainingSpecification
 from .system import OpenMMEnergyModel, wrap_openmm_model

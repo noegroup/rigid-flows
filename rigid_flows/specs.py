@@ -49,13 +49,6 @@ class QuatUpdateSpecification:
 
 
 @pytree_dataclass(frozen=True)
-class PreprocessingSpecification:
-    auxiliary_update: PosAndAuxUpdateSpecification
-    position_encoder: PosEncoderSpecification
-    act_norm: bool
-
-
-@pytree_dataclass(frozen=True)
 class CouplingSpecification:
     num_repetitions: int
     auxiliary_update: PosAndAuxUpdateSpecification
@@ -66,7 +59,6 @@ class CouplingSpecification:
 
 @pytree_dataclass(frozen=True)
 class FlowSpecification:
-    preprocessing: PreprocessingSpecification
     couplings: tuple[CouplingSpecification, ...]
 
 

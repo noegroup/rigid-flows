@@ -27,28 +27,6 @@ model:
 
   # definition of the flow model
   flow:
-
-    # initial transform
-    preprocessing:
-      act_norm: false
-      auxiliary_update:
-        seq_len: 16
-        activation: gelu
-        num_pos: 3
-        num_dims: 64
-        expansion_factor: 2
-        num_blocks: 1
-        num_low_rank: 0
-        low_rank_regularizer: 0.
-        transform: gated
-      position_encoder:
-        seq_len: 16
-        activation: gelu
-        num_dims: 64
-        num_pos: 3
-        expansion_factor: 2
-        num_blocks: 1
-
     # coupling layers
     couplings:
       - num_repetitions: 2

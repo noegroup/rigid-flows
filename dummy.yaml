@@ -55,7 +55,7 @@ model:
           activation: gelu
           expansion_factor: 2
           num_blocks: 1
-        act_norm: true
+        act_norm: false
       
   base:
     path: "/home/jonas/Downloads"

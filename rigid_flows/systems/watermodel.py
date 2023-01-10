@@ -25,6 +25,7 @@ class WaterModel:
         positions,
         box,
         water_type="tip4pew",
+        rigidWater=True,
         nonbondedCutoff=1,
         barostat=None,
         external_field=None,
@@ -63,7 +64,7 @@ class WaterModel:
             topology,
             nonbondedMethod=openmm.app.PME,
             nonbondedCutoff=nonbondedCutoff,
-            rigidWater=True,
+            rigidWater=rigidWater,
             removeCMMotion=True,
         )
         forces = {f.__class__.__name__: f for f in system.getForces()}
@@ -123,6 +124,7 @@ class WaterModel:
         self.n_atoms = n_waters * n_sites
         self.water_type = water_type
         self.nonbondedCutoff = nonbondedCutoff
+        self.rigidWater = rigidWater
 
     @property
     def positions(self):
@@ -232,17 +234,22 @@ class WaterModel:
 
         self.external_field = external_field
 
-    def save_to_json(self, filename):
+    @property
+    def init_info(self):
         init_info = {
             "positions": self._positions.tolist(),
             "box": self._box.tolist(),
             "water_type": self.water_type,
+            "rigidWater": self.rigidWater,
             "nonbondedCutoff": self.nonbondedCutoff,
             "barostat": self.barostat,
             "external_field": self.external_field,
         }
+        return init_info
+
+    def save_to_json(self, filename):
         with open(filename, "w") as f:
-            json.dump(init_info, f)
+            json.dump(self.init_info, f)
 
     @staticmethod
     def load_from_json(filename):

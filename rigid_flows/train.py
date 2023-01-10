@@ -1,5 +1,6 @@
 from itertools import accumulate
 from math import prod
+from termios import FF1
 from typing import Callable, Iterable, cast
 
 import equinox as eqx
@@ -193,13 +194,16 @@ def update_fn(
         (loss, report), grad = eqx.filter_value_and_grad(loss_fn, has_aux=True)(
             flow
         )
-        params = eqx.filter(flow, eqx.is_array)
-        grad = jax.tree_map(
-            lambda node: jax.tree_map(lambda x: jnp.zeros_like(x), node),
-            grad,
-            is_leaf=lambda node: isinstance(node, EuclideanToRigidTransform),
+
+        grad = (
+            lenses.bind(grad)
+            .Recur(EuclideanToRigidTransform)
+            .modify(
+                lambda node: jax.tree_map(lambda x: jnp.zeros_like(x), node)
+            )
         )
-        updates, opt_state = optim.update(grad, opt_state, params)  # type: ignore
+
+        updates, opt_state = optim.update(grad, opt_state)  # type: ignore
         flow = cast(
             Transform[DataWithAuxiliary, DataWithAuxiliary],
             eqx.apply_updates(flow, updates),
@@ -217,9 +221,6 @@ def train_fn(
 ):
     params = eqx.filter(flow, eqx.is_array)
     optim = optax.adam(get_scheduler(specs))
-    optim = optax.apply_if_finite(optim, specs.apply_if_finite_trials)
-    if specs.use_grad_clipping:
-        optim = optax.adaptive_grad_clip(specs.grad_clipping_ratio)
 
     opt_state = optim.init(params)  # type: ignore
 
@@ -228,6 +229,7 @@ def train_fn(
         flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
     ) -> TotLossFun:
         chain = key_chain(key)
+        # chain = key_chain(42)
         partial_loss_fns = []
         if specs.weight_fe > 0:
             partial_loss_fns.append(
@@ -270,7 +272,7 @@ def train_fn(
                         perturbation_noise=specs.fm_model_perturbation_noise,
                         ignore_charge_site=specs.fm_ignore_charge_site,
                     ),
-                    specs.weight_nll,
+                    specs.weight_fm_model,
                 )
             )
         if specs.weight_fm_target > 0:
@@ -286,7 +288,7 @@ def train_fn(
                         perturbation_noise=specs.fm_target_perturbation_noise,
                         ignore_charge_site=specs.fm_ignore_charge_site,
                     ),
-                    specs.weight_nll,
+                    specs.weight_fm_target,
                 )
             )
         if specs.weight_vg_model > 0:
@@ -314,7 +316,7 @@ def train_fn(
                         base=base.potential,
                         num_samples=specs.num_samples,
                     ),
-                    specs.weight_vg_model,
+                    specs.weight_vg_target,
                 )
             )
         return total_loss_fn(partial_loss_fns)

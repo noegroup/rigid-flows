@@ -4,12 +4,20 @@ from math import sqrt
 
 import equinox as eqx
 import jax
+from equinox.filters import is_array
 from jax import numpy as jnp
 from jaxtyping import Array, Float
 
 from flox.util import key_chain
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
+
+
+def zero_param(x):
+    if eqx.is_array(x):
+        return jnp.zeros_like(x)
+    else:
+        return x
 
 
 class QuatEncoder(eqx.Module):
@@ -24,7 +32,9 @@ class QuatEncoder(eqx.Module):
             num_out (int): number of dimensions of output representation.
             key (KeyArray): PRNG Key for layer initialization
         """
-        self.encoder = eqx.nn.Linear(4, num_out + 1, key=key)
+        self.encoder = jax.tree_map(
+            zero_param, eqx.nn.Linear(4, num_out + 1, key=key)
+        )
 
     def __call__(
         self, quat: Float[Array, "... num_mols 4"]
@@ -205,31 +215,40 @@ class MLPMixerLayer(eqx.Module):
     ) -> None:
         chain = key_chain(key)
         num_hidden = int(num_inp * expansion_factor)
-        self.dim_mixer = eqx.nn.Sequential(
-            [
-                eqx.nn.Linear(num_inp, num_hidden, key=next(chain)),
-                eqx.nn.Lambda(activation),
-                eqx.nn.Linear(num_hidden, num_inp, key=next(chain)),
-            ]
+
+        self.dim_mixer = jax.tree_map(
+            zero_param,
+            eqx.nn.Sequential(
+                [
+                    eqx.nn.Linear(num_inp, num_hidden, key=next(chain)),
+                    eqx.nn.Lambda(activation),
+                    eqx.nn.Linear(num_hidden, num_inp, key=next(chain)),
+                ]
+            ),
         )
         self.dim_norm = eqx.nn.LayerNorm(num_inp, elementwise_affine=True)
 
-        self.token_mixer = eqx.nn.Sequential(
-            [
-                eqx.nn.Linear(seq_len, num_hidden, key=next(chain)),
-                eqx.nn.Lambda(activation),
-                eqx.nn.Linear(num_hidden, seq_len, key=next(chain)),
-            ]
+        self.token_mixer = jax.tree_map(
+            zero_param,
+            eqx.nn.Sequential(
+                [
+                    eqx.nn.Linear(seq_len, num_hidden, key=next(chain)),
+                    eqx.nn.Lambda(activation),
+                    eqx.nn.Linear(num_hidden, seq_len, key=next(chain)),
+                ]
+            ),
         )
         self.token_norm = eqx.nn.LayerNorm(num_inp, elementwise_affine=True)
 
     def __call__(self, input):
-        input = input + jax.vmap(self.dim_mixer, in_axes=0)(
-            jax.vmap(self.dim_norm)(input)
-        )
-        input = input + jax.vmap(self.token_mixer, in_axes=1, out_axes=1)(
-            jax.vmap(self.token_norm)(input)
-        )
+        input = input + jax.vmap(self.dim_mixer, in_axes=0)(input)
+        input = input + jax.vmap(self.token_mixer, in_axes=1, out_axes=1)(input)
+        # input = input + jax.vmap(self.dim_mixer, in_axes=0)(
+        #     jax.vmap(self.dim_norm)(input)
+        # )
+        # input = input + jax.vmap(self.token_mixer, in_axes=1, out_axes=1)(
+        #     jax.vmap(self.token_norm)(input)
+        # )
         return input
 
 
@@ -253,7 +272,9 @@ class MLPMixer(eqx.Module):
     ):
         chain = key_chain(key)
         num_hidden = int(num_inp * expansion_factor)
-        self.encoder = eqx.nn.Linear(num_inp, num_hidden, key=next(chain))
+        self.encoder = jax.tree_map(
+            zero_param, eqx.nn.Linear(num_inp, num_hidden, key=next(chain))
+        )
         self.mixers = LayerStacked(
             [
                 MLPMixerLayer(
@@ -266,13 +287,15 @@ class MLPMixer(eqx.Module):
                 for _ in range(num_blocks)
             ],
         )
-        self.decoder = eqx.nn.Linear(num_hidden, num_out, key=next(chain))
+        self.decoder = jax.tree_map(
+            zero_param, eqx.nn.Linear(num_hidden, num_out, key=next(chain))
+        )
         self.norm = eqx.nn.LayerNorm(num_hidden, elementwise_affine=True)
 
     def __call__(self, input):
         hidden = jax.vmap(self.encoder)(input)
         hidden = self.mixers(hidden)
-        hidden = self.norm(hidden)
+        # hidden = self.norm(hidden)
         out = jax.vmap(self.decoder)(hidden)
         return out
 

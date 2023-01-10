@@ -69,7 +69,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 box=box,
                 has_batch_dim=has_batch_dim,
             )
-            results["omm"] = energy(pos) - jnp.log(self.data.stds).sum()
+            results["omm"] = energy(pos)
         if com:
             data_com = inp.pos.mean(axis=(-2, -3))
             com_prob = self.com_model.log_prob(data_com)
@@ -128,7 +128,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
             aux = self.aux_model.sample(seed=next(chain))
             com = self.com_model.sample(seed=next(chain))
-            # pos = pos - pos.mean(axis=(0, 1), keepdims=True) + com[None, None]
+            pos = pos - pos.mean(axis=(0, 1), keepdims=True) + com[None, None]
 
             force = None
             sign = jnp.sign(

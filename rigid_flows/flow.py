@@ -15,13 +15,7 @@ from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.impl import Affine
 from flox._src.geom.euclidean import inner, norm, unit
-from flox.flow import (
-    DoubleMoebius,
-    Pipe,
-    Transform,
-    Transformed,
-    VectorizedTransform,
-)
+from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
 from flox.util import key_chain, unpack
 
 from .data import DataWithAuxiliary
@@ -619,21 +613,16 @@ class PosUpdate(eqx.Module):
 
 
 class EuclideanToRigidTransform(equinox.Module):
-
-    mean: jnp.ndarray
-    std: jnp.ndarray
-
     def forward(
         self, input: DataWithAuxiliary
     ) -> Transformed[RigidWithAuxiliary]:
         rigid, ldj = unpack(
             VectorizedTransform(RigidTransform()).forward(input.pos)
         )
-        # pos = rigid.pos
-        pos = (rigid.pos - self.mean) / self.std
-        ldj = ldj - jnp.log(self.std).sum()
         return Transformed(
-            RigidWithAuxiliary(rigid.rot, pos, rigid.ics, input.aux, input.box),
+            RigidWithAuxiliary(
+                rigid.rot, rigid.pos, rigid.ics, input.aux, input.box
+            ),
             ldj,
         )
 
@@ -641,14 +630,10 @@ class EuclideanToRigidTransform(equinox.Module):
         self, input: RigidWithAuxiliary
     ) -> Transformed[DataWithAuxiliary]:
 
-        # pos = input.pos
-        pos = input.pos * self.std + self.mean
-
-        rigid = jax.vmap(RigidRepresentation)(input.rot, pos, input.ics)
+        rigid = jax.vmap(RigidRepresentation)(input.rot, input.pos, input.ics)
 
         pos, ldj = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))
 
-        ldj = ldj + jnp.log(self.std).sum()
         sign = jnp.sign(input.rot[:, (0,)])
         return Transformed(
             DataWithAuxiliary(pos, input.aux, sign, input.box, None),
@@ -740,10 +725,10 @@ def build_flow(
     couplings = Pipe(blocks)
     return Pipe(
         [
-            EuclideanToRigidTransform(target.data.modes, target.data.stds),
+            EuclideanToRigidTransform(),
             couplings,
             Inverted(
-                EuclideanToRigidTransform(base.data.modes, base.data.stds)
+                EuclideanToRigidTransform()
             ),
         ]
     )

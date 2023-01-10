@@ -15,7 +15,13 @@ from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.impl import Affine
 from flox._src.geom.euclidean import inner, norm, unit
-from flox.flow import DoubleMoebius, Pipe, Transform, Transformed, VectorizedTransform
+from flox.flow import (
+    DoubleMoebius,
+    Pipe,
+    Transform,
+    Transformed,
+    VectorizedTransform,
+)
 from flox.util import key_chain, unpack
 
 from .data import DataWithAuxiliary
@@ -401,7 +407,7 @@ class QuatUpdate(eqx.Module):
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (pos.shape[0], 1))
         feats = jnp.concatenate([aux, pos], axis=-1)
-        out = self.net(feats)
+        out = self.net(feats) * 1e-2
 
         reflection = out
 
@@ -494,7 +500,7 @@ class AuxUpdate(eqx.Module):
         """
         pos = input.pos
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats).reshape(input.aux.shape[0], -1)
+        out = self.net(feats).reshape(input.aux.shape[0], -1) * 1e-2
 
         shift_and_scale, low_rank = jnp.split(out, [2 * input.aux.shape[-1]], axis=-1)  # type: ignore
         shift, scale = jnp.split(shift_and_scale, 2, axis=-1)  # type: ignore
@@ -585,7 +591,7 @@ class PosUpdate(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
 
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats).reshape(input.pos.shape[0], -1)
+        out = self.net(feats).reshape(input.pos.shape[0], -1) * 1e-2
 
         shift_and_scale, low_rank = jnp.split(out, [2 * input.pos.shape[-1]], axis=-1)  # type: ignore
         shift, scale = jnp.split(shift_and_scale, 2, axis=-1)  # type: ignore
@@ -721,14 +727,12 @@ def build_flow(
     for coupling in specs.couplings:
         blocks.append(_coupling(next(chain), auxiliary_shape, coupling))
 
-    # couplings = LayerStackedPipe(blocks, use_scan=False)
-    couplings = Pipe(blocks)
+    couplings = LayerStackedPipe(blocks, use_scan=True)
+    # couplings = Pipe(blocks)
     return Pipe(
         [
             EuclideanToRigidTransform(),
             couplings,
-            Inverted(
-                EuclideanToRigidTransform()
-            ),
+            Inverted(EuclideanToRigidTransform()),
         ]
     )

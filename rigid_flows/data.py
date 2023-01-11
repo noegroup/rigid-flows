@@ -3,34 +3,25 @@ import logging
 import jax
 import lenses
 import numpy as np
+from flox import geom
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 
-from flox import geom
-
-from .system import (
-    ErrorHandling,
-    OpenMMEnergyModel,
-    SimulationBox,
-    SystemSpecification,
-)
+from .system import ErrorHandling, OpenMMEnergyModel, SimulationBox, SystemSpecification
 from .utils import smooth_maximum
 
+N_SITES = 4
 logger = logging.getLogger("rigid-flows")
 
 
 def unwrap(pos: jnp.ndarray, box: SimulationBox):
-    for i in range(pos.shape[1]):
-        for j in range(pos.shape[2]):
-            for k in range(pos.shape[3]):
-                orig = pos[:, i, j, k]
-                flipped = jnp.where(
-                    orig < box.size[k] / 2, orig + box.size[k], orig
-                )
-                if jnp.std(orig) - jnp.std(flipped) > 0.01:
-                    pos = pos.at[:, i, j, k].set(flipped)
-    return pos
+    """Choose periodic image so that each atom stays close to its initial position."""
+    return jnp.where(
+        jnp.abs(pos - pos[0]) / box.size > 0.5,
+        pos - jnp.sign(pos - pos[0]) * box.size,
+        pos,
+    )
 
 
 @pytree_dataclass(frozen=True)
@@ -52,13 +43,11 @@ class Data:
         raw = np.load(path)
         data = Data(*map(jnp.array, raw.values()))
         data = lenses.bind(data).pos.set(
-            data.pos.reshape(data.pos.shape[0], -1, 4, 3)
+            data.pos.reshape(data.pos.shape[0], -1, N_SITES, 3)
         )
         data = lenses.bind(data).pos.set(unwrap(data.pos, box))
         if data.box.shape[1:] == (3, 3):
-            data = Data(
-                data.pos, jax.vmap(jnp.diag)(data.box), data.energy, data.force
-            )
+            data = Data(data.pos, jax.vmap(jnp.diag)(data.box), data.energy, data.force)
         assert data.box.shape[1:] == (3,)
 
         return data
@@ -113,12 +102,10 @@ class PreprocessedData:
             data.pos, data.pos - modes[:, None]
         )
 
-        return PreprocessedData(
-            pos, data.box, data.energy, data.force, modes, stds
-        )
+        return PreprocessedData(pos, data.box, data.energy, data.force, modes, stds)
 
     def estimate_com_stats(self):
-        pos = self.pos.reshape(self.pos.shape[0], -1, 4, 3)
+        pos = self.pos.reshape(self.pos.shape[0], -1, N_SITES, 3)
         coms = pos.mean(axis=(1, 2))
         return jnp.mean(coms, axis=0), jnp.std(coms, axis=0)
 

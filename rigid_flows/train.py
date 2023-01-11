@@ -8,16 +8,15 @@ import jax
 import lenses
 import optax
 import tensorflow as tf  # type: ignore
+from flox._src.flow.potential import Potential
+from flox._src.flow.sampling import PushforwardSampler, Sampler
+from flox.flow import PullbackSampler, Transform
+from flox.util import key_chain
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 from optax import GradientTransformation, OptState
 from tqdm import tqdm
-
-from flox._src.flow.potential import Potential
-from flox._src.flow.sampling import PushforwardSampler, Sampler
-from flox.flow import PullbackSampler, Transform
-from flox.util import key_chain
 
 from .data import DataWithAuxiliary
 from .density import DensityModel, OpenMMDensity
@@ -78,12 +77,9 @@ def force_matching_loss_fn(
     if perturbation_noise > 0:
         samples = lenses.bind(samples).pos.set(
             samples.pos
-            + perturbation_noise
-            * jax.random.normal(next(chain), samples.pos.shape)
+            + perturbation_noise * jax.random.normal(next(chain), samples.pos.shape)
         )
-    _, omm_forces = wrap_openmm_model(omm_energy_model)[1](
-        samples.pos, None, True
-    )
+    _, omm_forces = wrap_openmm_model(omm_energy_model)[1](samples.pos, None, True)
 
     num_atoms = prod(samples.pos.shape[1:])
     if ignore_charge_site:
@@ -92,9 +88,7 @@ def force_matching_loss_fn(
     else:
         mask = jnp.ones((num_samples, num_atoms))
 
-    def evaluate(
-        flow: Transform[DataWithAuxiliary, DataWithAuxiliary]
-    ) -> Array:
+    def evaluate(flow: Transform[DataWithAuxiliary, DataWithAuxiliary]) -> Array:
         raise NotImplementedError()
         # flow_grads = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(
         #     samples
@@ -125,15 +119,19 @@ def kullback_leiber_divergence_fn(
 ) -> LossFun:
     keys = jax.random.split(key, num_samples)
 
-    def evaluate(
-        flow: Transform[DataWithAuxiliary, DataWithAuxiliary]
-    ) -> Array:
+    def evaluate(flow: Transform[DataWithAuxiliary, DataWithAuxiliary]) -> Array:
         if not reverse:
             out = jax.vmap(PushforwardSampler(target.sample, flow))(keys)
             return jnp.mean(jax.vmap(base.potential)(out.obj) - out.ldj)
         else:
             out = jax.vmap(PullbackSampler(base.sample, flow))(keys)
             return jnp.mean(jax.vmap(target.potential)(out.obj) - out.ldj)
+        # if reverse:
+        #     out = jax.vmap(PushforwardSampler(base.sample, flow))(keys)
+        #     return jnp.mean(jax.vmap(target.potential)(out.obj) - out.ldj)
+        # else:
+        #     out = jax.vmap(PullbackSampler(target.sample, flow))(keys)
+        #     return jnp.mean(jax.vmap(base.potential)(out.obj) - out.ldj)
 
     return evaluate
 
@@ -150,9 +148,7 @@ def var_grad_loss_fn(
 
     samples = jax.lax.stop_gradient(jax.vmap(sampler)(keys).obj)
 
-    def evaluate(
-        flow: Transform[DataWithAuxiliary, DataWithAuxiliary]
-    ) -> Array:
+    def evaluate(flow: Transform[DataWithAuxiliary, DataWithAuxiliary]) -> Array:
         raise NotImplementedError()
         # flow_energies = jax.vmap(PushforwardPotential(base, flow))(samples)
         # target_energies = jax.vmap(target)(samples)
@@ -191,16 +187,12 @@ def update_fn(
         flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
         opt_state: OptState,
     ):
-        (loss, report), grad = eqx.filter_value_and_grad(loss_fn, has_aux=True)(
-            flow
-        )
+        (loss, report), grad = eqx.filter_value_and_grad(loss_fn, has_aux=True)(flow)
 
         grad = (
             lenses.bind(grad)
             .Recur(EuclideanToRigidTransform)
-            .modify(
-                lambda node: jax.tree_map(lambda x: jnp.zeros_like(x), node)
-            )
+            .modify(lambda node: jax.tree_map(lambda x: jnp.zeros_like(x), node))
         )
 
         updates, opt_state = optim.update(grad, opt_state)  # type: ignore
@@ -341,6 +333,7 @@ def run_training_stage(
     system_specs: SystemSpecification,
     reporter: Reporter,
     tot_iter: int,
+    loss_reporter: list | None = None,
 ) -> Transform[DataWithAuxiliary, DataWithAuxiliary]:
 
     chain = key_chain(key)
@@ -351,25 +344,25 @@ def run_training_stage(
     with jit_and_cleanup_cache(train_step) as step:
         for num_epoch in range(training_specs.num_epochs):
 
-            target.omm_model.set_softcore_cutoff(
-                system_specs.softcore_cutoff,
-                system_specs.softcore_potential,
-                system_specs.softcore_slope,
-            )
+            if system_specs.softcore_cutoff is not None:
+                target.omm_model.set_softcore_cutoff(
+                    system_specs.softcore_cutoff,
+                    system_specs.softcore_potential,
+                    system_specs.softcore_slope,
+                )
 
             epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
             pbar = tqdm(
                 range(training_specs.num_iters_per_epoch),
-                desc=f"Epoch: {num_epoch}",
+                desc=f"Epoch: {1+num_epoch}/{training_specs.num_epochs}",
             )
 
             for _ in pbar:
-                loss, flow, opt_state, report = step(
-                    next(chain), flow, opt_state
-                )
-                tf.summary.scalar(
-                    f"loss/total/{reporter.scope}", loss, tot_iter
-                )
+                loss, flow, opt_state, report = step(next(chain), flow, opt_state)
+                pbar.set_postfix({"loss": loss})
+                tf.summary.scalar(f"loss/total/{reporter.scope}", loss, tot_iter)
+                if loss_reporter is not None:
+                    loss_reporter.append(loss.item())
                 for name, val in report.items():
                     tf.summary.scalar(f"loss/{name}", val, tot_iter)
 
@@ -380,7 +373,8 @@ def run_training_stage(
                 )
                 tot_iter += 1
 
-            target.omm_model.set_softcore_cutoff(None)
+            if system_specs.softcore_cutoff is not None:
+                target.omm_model.set_softcore_cutoff(None)
 
             epoch_reporter.report_model(next(chain), flow, tot_iter)
     return flow

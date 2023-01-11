@@ -124,7 +124,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 next(chain), minval=0, maxval=len(self.data.pos), shape=()
             )
             box = SimulationBox(self.data.box[idx])
-            pos = self.data.pos[idx].reshape(-1, 4, 3)
+            pos = self.data.pos[idx].reshape(self.omm_model.model.n_waters, self.omm_model.model.n_sites, 3)
 
             aux = self.aux_model.sample(seed=next(chain))
             com = self.com_model.sample(seed=next(chain))
@@ -148,11 +148,12 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
     ):
 
         omm_model = OpenMMEnergyModel.from_specs(sys_specs)
-        omm_model.set_softcore_cutoff(
-            sys_specs.softcore_cutoff,
-            sys_specs.softcore_potential,
-            sys_specs.softcore_slope,
-        )
+        if sys_specs.softcore_cutoff is not None:
+            omm_model.set_softcore_cutoff(
+                sys_specs.softcore_cutoff,
+                sys_specs.softcore_potential,
+                sys_specs.softcore_slope,
+            )
 
         box = SimulationBox(jnp.diag(omm_model.model.box))
 

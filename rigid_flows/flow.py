@@ -717,11 +717,12 @@ def build_flow(
     specs: FlowSpecification,
     base: OpenMMDensity,
     target: OpenMMDensity,
+    std_rescaling: bool = True
 ) -> Pipe[DataWithAuxiliary, DataWithAuxiliary]:
     """Creates the final flow composed of:
 
      - a preprocessing transformation
-     - multiple coupling blokcks
+     - multiple coupling blocks
 
     Args:
         key (KeyArray): PRNG key
@@ -738,12 +739,18 @@ def build_flow(
 
     # couplings = LayerStackedPipe(blocks, use_scan=False)
     couplings = Pipe(blocks)
+    if std_rescaling:
+        target_stds = target.data.stds
+        base_stds = base.data.stds
+    else:
+        target_stds = jnp.ones_like(target.data.stds)
+        base_stds = jnp.ones_like(base.data.stds)
     return Pipe(
         [
-            EuclideanToRigidTransform(target.data.modes, target.data.stds),
+            EuclideanToRigidTransform(target.data.modes, target_stds),
             couplings,
             Inverted(
-                EuclideanToRigidTransform(base.data.modes, base.data.stds)
+                EuclideanToRigidTransform(base.data.modes, base_stds)
             ),
         ]
     )

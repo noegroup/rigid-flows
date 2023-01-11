@@ -60,7 +60,7 @@ model:
   base:
     path: "/home/jonas/Downloads"
     num_molecules: 16
-    temperature: 100
+    temperature: 250
     ice_type: XI
     water_type: tip4pew-customLJ
     recompute_forces: false
@@ -75,7 +75,7 @@ model:
   target:
     path: "/home/jonas/Downloads"
     num_molecules: 16
-    temperature: 100
+    temperature: 250
     ice_type: XI
     water_type: tip4pew-customLJ
     recompute_forces: false

@@ -407,7 +407,7 @@ class QuatUpdate(eqx.Module):
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (pos.shape[0], 1))
         feats = jnp.concatenate([aux, pos], axis=-1)
-        out = self.net(feats) * 1e-2
+        out = self.net(feats)
 
         reflection = out
 
@@ -500,7 +500,7 @@ class AuxUpdate(eqx.Module):
         """
         pos = input.pos
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats).reshape(input.aux.shape[0], -1) * 1e-2
+        out = self.net(feats).reshape(input.aux.shape[0], -1)
 
         shift_and_scale, low_rank = jnp.split(out, [2 * input.aux.shape[-1]], axis=-1)  # type: ignore
         shift, scale = jnp.split(shift_and_scale, 2, axis=-1)  # type: ignore
@@ -591,7 +591,7 @@ class PosUpdate(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
 
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats).reshape(input.pos.shape[0], -1) * 1e-2
+        out = self.net(feats).reshape(input.pos.shape[0], -1)
 
         shift_and_scale, low_rank = jnp.split(out, [2 * input.pos.shape[-1]], axis=-1)  # type: ignore
         shift, scale = jnp.split(shift_and_scale, 2, axis=-1)  # type: ignore
@@ -619,15 +619,19 @@ class PosUpdate(eqx.Module):
 
 
 class EuclideanToRigidTransform(equinox.Module):
+
+    mean: jnp.ndarray
+
     def forward(
         self, input: DataWithAuxiliary
     ) -> Transformed[RigidWithAuxiliary]:
         rigid, ldj = unpack(
             VectorizedTransform(RigidTransform()).forward(input.pos)
         )
+        pos = rigid.pos - self.mean
         return Transformed(
             RigidWithAuxiliary(
-                rigid.rot, rigid.pos, rigid.ics, input.aux, input.box
+                rigid.rot, pos, rigid.ics, input.aux, input.box
             ),
             ldj,
         )
@@ -635,9 +639,9 @@ class EuclideanToRigidTransform(equinox.Module):
     def inverse(
         self, input: RigidWithAuxiliary
     ) -> Transformed[DataWithAuxiliary]:
-
-        rigid = jax.vmap(RigidRepresentation)(input.rot, input.pos, input.ics)
-
+        
+        pos = input.pos + self.mean
+        rigid = jax.vmap(RigidRepresentation)(input.rot, pos, input.ics)
         pos, ldj = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))
 
         sign = jnp.sign(input.rot[:, (0,)])
@@ -707,7 +711,6 @@ def build_flow(
     auxiliary_shape: tuple[int, ...],
     specs: FlowSpecification,
     base: OpenMMDensity,
-    target: OpenMMDensity,
 ) -> Pipe[DataWithAuxiliary, DataWithAuxiliary]:
     """Creates the final flow composed of:
 
@@ -727,12 +730,12 @@ def build_flow(
     for coupling in specs.couplings:
         blocks.append(_coupling(next(chain), auxiliary_shape, coupling))
 
-    couplings = LayerStackedPipe(blocks, use_scan=True)
-    # couplings = Pipe(blocks)
+    # couplings = LayerStackedPipe(blocks, use_scan=False)
+    couplings = Pipe(blocks)
     return Pipe(
         [
-            EuclideanToRigidTransform(),
+            EuclideanToRigidTransform(base.data.modes),
             couplings,
-            Inverted(EuclideanToRigidTransform()),
+            Inverted(EuclideanToRigidTransform(base.data.modes)),
         ]
     )

@@ -520,13 +520,13 @@ def report_model(
 
     # plot quaternion histograms
     if specs.plot_quaternions is not None:
-        data_quats = jax.vmap(EuclideanToRigidTransform().forward)(
+        data_quats = jax.vmap(EuclideanToRigidTransform(target.data.modes).forward)(
             data_samples.obj
         ).obj.rot
-        model_quats = jax.vmap(EuclideanToRigidTransform().forward)(
+        model_quats = jax.vmap(EuclideanToRigidTransform(base.data.modes).forward)(
             model_samples.obj
         ).obj.rot
-        prior_quats = jax.vmap(EuclideanToRigidTransform().forward)(
+        prior_quats = jax.vmap(EuclideanToRigidTransform(base.data.modes).forward)(
             prior_samples.obj
         ).obj.rot
         logging.info(f"plotting quaternions")

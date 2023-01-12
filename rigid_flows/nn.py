@@ -14,7 +14,7 @@ KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
 
 
 def zero_param(x):
-    return x
+    # return x
     if eqx.is_array(x):
         return jnp.zeros_like(x)
     else:

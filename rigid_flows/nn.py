@@ -1,6 +1,7 @@
 from functools import partial
 from itertools import accumulate
 from math import sqrt
+from turtle import forward
 
 import equinox as eqx
 import jax
@@ -8,13 +9,14 @@ from equinox.filters import is_array
 from jax import numpy as jnp
 from jaxtyping import Array, Float
 
+from flox._src import geom
 from flox.util import key_chain
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
 
 
 def zero_param(x):
-    return x
+    # return x
     if eqx.is_array(x):
         return jnp.zeros_like(x)
     else:
@@ -242,14 +244,12 @@ class MLPMixerLayer(eqx.Module):
         self.token_norm = eqx.nn.LayerNorm(num_inp, elementwise_affine=True)
 
     def __call__(self, input):
-        input = input + jax.vmap(self.dim_mixer, in_axes=0)(input)
-        input = input + jax.vmap(self.token_mixer, in_axes=1, out_axes=1)(input)
-        # input = input + jax.vmap(self.dim_mixer, in_axes=0)(
-        #     jax.vmap(self.dim_norm)(input)
-        # )
-        # input = input + jax.vmap(self.token_mixer, in_axes=1, out_axes=1)(
-        #     jax.vmap(self.token_norm)(input)
-        # )
+        input = input + jax.vmap(self.dim_mixer, in_axes=0)(
+            jax.vmap(self.dim_norm)(input)
+        )
+        input = input + jax.vmap(self.token_mixer, in_axes=1, out_axes=1)(
+            jax.vmap(self.token_norm)(input)
+        )
         return input
 
 
@@ -296,7 +296,7 @@ class MLPMixer(eqx.Module):
     def __call__(self, input):
         hidden = jax.vmap(self.encoder)(input)
         hidden = self.mixers(hidden)
-        # hidden = self.norm(hidden)
+        hidden = self.norm(hidden)
         out = jax.vmap(self.decoder)(hidden)
         return out
 

@@ -111,7 +111,7 @@ class OpenMMEnergyModel:
                     )
                 case _:
                     raise ValueError(f"unkown cutoff type: '{type}'")
-        self.model.set_customLJ(expr, self.context)
+            self.model.set_customLJ(expr, self.context)
 
     def set_box(self, box: SimulationBox):
         box_vectors = np.diag(np.array(box.size))

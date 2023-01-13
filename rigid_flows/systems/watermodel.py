@@ -30,7 +30,13 @@ class WaterModel:
         barostat=None,
         external_field=None,
     ):
-        if water_type not in ["tip3p", "tip4pew", "tip5p", "spce", "tip4pew-customLJ"]:
+        if water_type not in [
+            "tip3p",
+            "tip4pew",
+            "tip5p",
+            "spce",
+            "tip4pew-customLJ",
+        ]:
             print(
                 f"+++ WARNING: Unknown water_type `{water_type}` +++",
                 file=stderr,
@@ -59,7 +65,9 @@ class WaterModel:
                 file=stderr,
             )
 
-        ff = openmm.app.ForceField(water_type.removesuffix("-customLJ") + ".xml")
+        ff = openmm.app.ForceField(
+            water_type.removesuffix("-customLJ") + ".xml"
+        )
         system = ff.createSystem(
             topology,
             nonbondedMethod=openmm.app.PME,
@@ -72,15 +80,21 @@ class WaterModel:
         forces["NonbondedForce"].setUseDispersionCorrection(True)
         forces["NonbondedForce"].setEwaldErrorTolerance(1e-4)  # default is 5e-4
         oxygen_parameters = forces["NonbondedForce"].getParticleParameters(0)
-        self.charge_O = oxygen_parameters[0].value_in_unit(unit.elementary_charge)
+        self.charge_O = oxygen_parameters[0].value_in_unit(
+            unit.elementary_charge
+        )
         self.sigma_O = oxygen_parameters[1].value_in_unit(unit.nanometer)
-        self.epsilon_O = oxygen_parameters[2].value_in_unit(unit.kilojoule_per_mole)
+        self.epsilon_O = oxygen_parameters[2].value_in_unit(
+            unit.kilojoule_per_mole
+        )
 
         if "customLJ" in water_type:
             # remove LJ interaction
             oxygen_parameters[2] *= 0  # set epsilon_O to zero
             for i in range(0, system.getNumParticles(), n_sites):
-                forces["NonbondedForce"].setParticleParameters(i, *oxygen_parameters)
+                forces["NonbondedForce"].setParticleParameters(
+                    i, *oxygen_parameters
+                )
 
             # add equivalent CustomNonbondedForce
             Ulj_str = f"4*{self.epsilon_O}*(({self.sigma_O}/r)^12-({self.sigma_O}/r)^6)"
@@ -117,7 +131,9 @@ class WaterModel:
 
         self._positions = np.array(positions)
         self._box = np.array(box)
-        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diagonal(box)))
+        self.is_box_orthorombic = not np.count_nonzero(
+            box - np.diag(np.diagonal(box))
+        )
 
         self.n_waters = n_waters
         self.n_sites = n_sites
@@ -143,7 +159,9 @@ class WaterModel:
         self._box = np.array(box)
         self.topology.setPeriodicBoxVectors(box)
         self.system.setDefaultPeriodicBoxVectors(*box)
-        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diagonal(box)))
+        self.is_box_orthorombic = not np.count_nonzero(
+            box - np.diag(np.diagonal(box))
+        )
 
     @staticmethod
     def generate_mdtraj_topology(n_waters, n_sites=4):
@@ -190,10 +208,14 @@ class WaterModel:
         if barostat is None:
             pass
         elif barostat == "iso":
-            self.system.addForce(openmm.MonteCarloBarostat(pressure, temperature))
+            self.system.addForce(
+                openmm.MonteCarloBarostat(pressure, temperature)
+            )
         elif barostat == "aniso":
             self.system.addForce(
-                openmm.MonteCarloAnisotropicBarostat(3 * [pressure], temperature)
+                openmm.MonteCarloAnisotropicBarostat(
+                    3 * [pressure], temperature
+                )
             )
         elif barostat == "tri":
             self.system.addForce(
@@ -278,7 +300,9 @@ class WaterModel:
                     ),
                 ):
                     force.setDefaultTemperature(temperature)
-        simulation = openmm.app.Simulation(self.topology, self.system, integrator)
+        simulation = openmm.app.Simulation(
+            self.topology, self.system, integrator
+        )
         simulation.context.setPositions(self.positions)
 
         if minimizeEnergy:
@@ -298,7 +322,9 @@ class WaterModel:
 
         return simulation
 
-    def set_customLJ(self, energy_expression, context=None, keep_positions=False):
+    def set_customLJ(
+        self, energy_expression, context=None, keep_positions=False
+    ):
         """energy_expression: the new Lennard Jones expression, using 'r' for atoms distance"""
 
         if "customLJ" not in self.water_type:
@@ -344,7 +370,9 @@ class WaterModel:
             if self.is_box_orthorombic:
                 mypos = (pos / np.diagonal(av_box) % 1) * np.diagonal(av_box)
             else:
-                raise NotImplementedError("only available for fixed orthorombic box")
+                raise NotImplementedError(
+                    "only available for fixed orthorombic box"
+                )
         else:
             mypos = pos
 
@@ -390,9 +418,18 @@ class WaterModel:
             if not self.is_box_orthorombic:
                 coord2 = [
                     coord[1],
-                    [coord[1][0] + av_box[iii, i], coord[1][1] + av_box[iii, ii]],
-                    [coord[2][0] + av_box[iii, i], coord[2][1] + av_box[iii, ii]],
-                    [coord[3][0] + av_box[iii, i], coord[3][1] + av_box[iii, ii]],
+                    [
+                        coord[1][0] + av_box[iii, i],
+                        coord[1][1] + av_box[iii, ii],
+                    ],
+                    [
+                        coord[2][0] + av_box[iii, i],
+                        coord[2][1] + av_box[iii, ii],
+                    ],
+                    [
+                        coord[3][0] + av_box[iii, i],
+                        coord[3][1] + av_box[iii, ii],
+                    ],
                     coord[3],
                 ]
                 xs, ys = zip(*coord2)
@@ -418,7 +455,12 @@ class WaterModel:
         return traj
 
     def plot_rdf(
-        self, pos=None, box=None, r_range=[0, 1], selection="name == O", **kwargs
+        self,
+        pos=None,
+        box=None,
+        r_range=[0, 1],
+        selection="name == O",
+        **kwargs,
     ):
         traj = self.get_mdtraj(pos, box)
         ij = self.mdtraj_topology.select_pairs(selection, selection)

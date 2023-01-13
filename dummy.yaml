@@ -29,7 +29,7 @@ model:
   flow:
     # coupling layers
     couplings:
-      - num_repetitions: 1
+      - num_repetitions: 2
         auxiliary_update:
           seq_len: 16
           activation: gelu
@@ -62,29 +62,29 @@ model:
     num_molecules: 16
     temperature: 250
     ice_type: XI
-    water_type: tip4pew-customLJ
+    water_type: tip4pew
     recompute_forces: false
     store_forces: false
     forces_path: null
     fixed_box: true
 
-    softcore_cutoff: 0.9
-    softcore_potential: "linear"
+    softcore_cutoff: null # 0.9
+    softcore_potential: null # "linear"
     softcore_slope: 2.
 
   target:
     path: "/home/jonas/Downloads"
     num_molecules: 16
-    temperature: 250
+    temperature: 100
     ice_type: XI
-    water_type: tip4pew-customLJ
+    water_type: tip4pew
     recompute_forces: false
     store_forces: false
     forces_path: null
     fixed_box: true
 
-    softcore_cutoff: 0.9
-    softcore_potential: "linear"
+    softcore_cutoff: null # 0.9
+    softcore_potential: null # "linear"
     softcore_slope: 2.
 
 # training definition
@@ -94,8 +94,8 @@ train:
   - num_epochs: 3
     num_iters_per_epoch: 100
 
-    init_learning_rate: 1e-4
-    target_learning_rate: 1e-4
+    init_learning_rate: 1e-5
+    target_learning_rate: 1e-5
 
     weight_nll: 0.
 

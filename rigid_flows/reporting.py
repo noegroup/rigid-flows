@@ -157,8 +157,8 @@ def _plot_oxy_contour_lines(
         jnp.linspace(box.min[dim_j], box.max[dim_j], num_bins + 1),
     )
     h, levels, *_ = _compute_oxy_contour_levels(
-        p[:, :, dim_i].reshape(-1) % box.size[dim_i],
-        p[:, :, dim_j].reshape(-1) % box.size[dim_j],
+        p[:, :, dim_i].reshape(-1),  # % box.size[dim_i],
+        p[:, :, dim_j].reshape(-1),  # % box.size[dim_j],
     )
     return plt.contourf(
         gx,
@@ -538,9 +538,11 @@ def report_model(
     # plot oxygen histograms
     if specs.plot_oxygens:
         data_pos = data_samples.obj.pos[:, :, 0]
-        data_pos = data_pos - jnp.mean(data_pos, axis=(1,), keepdims=True)
+        data_pos = target.box.size * data_pos
+        # data_pos = data_pos - jnp.mean(data_pos, axis=(1,), keepdims=True)
         model_pos = model_samples.obj.pos[:, :, 0]
-        model_pos = model_pos - jnp.mean(model_pos, axis=(1,), keepdims=True)
+        model_pos = target.box.size * model_pos
+        # model_pos = model_pos - jnp.mean(model_pos, axis=(1,), keepdims=True)
 
         logging.info(f"plotting oxygens")
         fig = plot_oxygen_positions(model_pos, data_pos, target.box)

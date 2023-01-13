@@ -21,16 +21,12 @@ logger = logging.getLogger("rigid-flows")
 
 
 def unwrap(pos: jnp.ndarray, box: SimulationBox):
-    for i in range(pos.shape[1]):
-        for j in range(pos.shape[2]):
-            for k in range(pos.shape[3]):
-                orig = pos[:, i, j, k]
-                flipped = jnp.where(
-                    orig < box.size[k] / 2, orig + box.size[k], orig
-                )
-                if jnp.std(orig) - jnp.std(flipped) > 0.01:
-                    pos = pos.at[:, i, j, k].set(flipped)
-    return pos
+    """ "Using as reference the first configuration"""
+    return jnp.where(
+        jnp.abs(pos - pos[0]) / box.size > 0.5,
+        pos - jnp.sign(pos - pos[0]) * box.size,
+        pos,
+    )
 
 
 @pytree_dataclass(frozen=True)
@@ -108,13 +104,13 @@ class PreprocessedData:
         modes = jnp.mean(oxy, axis=0)
         stds = jnp.std(oxy, axis=0)
 
-        # unwrap positions
-        pos = modes[:, None] + geom.Torus(box.size).tangent(
-            data.pos, data.pos - modes[:, None]
-        )
+        # # unwrap positions
+        # pos = modes[:, None] + geom.Torus(box.size).tangent(
+        #     data.pos, data.pos - modes[:, None]
+        # )
 
         return PreprocessedData(
-            pos, data.box, data.energy, data.force, modes, stds
+            data.pos, data.box, data.energy, data.force, modes, stds
         )
 
     def estimate_com_stats(self):

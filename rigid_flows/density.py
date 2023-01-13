@@ -27,6 +27,14 @@ class DensityModel(Protocol[T]):
         ...
 
 
+def boxify(pos, box: SimulationBox):
+    oxy = pos[..., 0, :]
+    boxed_oxy = oxy % box.size
+    diff = boxed_oxy - oxy
+    pos = pos + diff[..., None, :]
+    return pos
+
+
 class OpenMMDensity(DensityModel[DataWithAuxiliary]):
     def __init__(
         self,
@@ -57,8 +65,9 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
         results = {}
 
+        pos = inp.pos * self.box.size
+
         if omm:
-            pos = inp.pos
             if self.sys_specs.fixed_box:
                 box = None
             else:
@@ -69,13 +78,13 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 box=box,
                 has_batch_dim=has_batch_dim,
             )
-            results["omm"] = energy(pos)
+            results["omm"] = energy(pos) + jnp.log(self.box.size).sum()
         if com:
             data_com = inp.pos.mean(axis=(-2, -3))
             com_prob = self.com_model.log_prob(data_com)
             for _ in range(len(self.com_model.batch_shape)):
                 com_prob = com_prob.sum(-1)
-            results["com"] = -com_prob
+            results["com"] = -com_prob * 0.0
         if aux:
             aux_prob = self.aux_model.log_prob(inp.aux)
             for _ in range(len(self.aux_model.batch_shape)):
@@ -125,10 +134,13 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             )
             box = SimulationBox(self.data.box[idx])
             pos = self.data.pos[idx].reshape(-1, 4, 3)
+            # pos = (pos / self.box.size) % 1
+            pos = boxify(pos, self.box)
+            pos = pos / self.box.size
 
             aux = self.aux_model.sample(seed=next(chain))
-            com = self.com_model.sample(seed=next(chain))
-            pos = pos - pos.mean(axis=(0, 1), keepdims=True) + com[None, None]
+            # com = self.com_model.sample(seed=next(chain))
+            # pos = pos - pos.mean(axis=(0, 1), keepdims=True) + com[None, None]
 
             force = None
             sign = jnp.sign(
@@ -139,6 +151,8 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
             sample = DataWithAuxiliary(pos, aux, sign, box, force)
             energy = self.potential(sample)
+
+            energy -= jnp.log(self.box.size).sum()
             return Transformed(sample, energy)
 
     @staticmethod

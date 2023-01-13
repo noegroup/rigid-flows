@@ -418,11 +418,11 @@ class WaterModel:
         return traj
 
     def plot_rdf(
-        self, pos=None, box=None, r_range=[0, 1], selection="name == O", **kwargs
+        self, pos=None, box=None, selection="name == O", r_range=[0, 1], n_bins=None, **kwargs
     ):
         traj = self.get_mdtraj(pos, box)
         ij = self.mdtraj_topology.select_pairs(selection, selection)
-        rdf = md.compute_rdf(traj, ij, r_range=r_range)
+        rdf = md.compute_rdf(traj, ij, r_range=r_range, n_bins=n_bins)
 
         plt.plot(*rdf, **kwargs)
         plt.ylabel("g(r)")

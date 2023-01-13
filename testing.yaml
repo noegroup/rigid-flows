@@ -91,10 +91,10 @@ model:
 train:
 
   # first stage: only likelihood
-  - num_epochs: 3
+  - num_epochs: 2
     num_iters_per_epoch: 1000
 
-    init_learning_rate: 1e-3
+    init_learning_rate: 1e-2
     target_learning_rate: 1e-3
 
     weight_nll: 0.
@@ -110,7 +110,7 @@ train:
     weight_vg_model: 0.
     weight_vg_target: 0.
   
-    num_samples: 64
+    num_samples: 32
 
     use_grad_clipping: false
     grad_clipping_ratio: 1.

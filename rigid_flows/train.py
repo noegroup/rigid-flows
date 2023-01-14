@@ -1,3 +1,4 @@
+from functools import partial
 from itertools import accumulate
 from math import prod
 from termios import FF1
@@ -220,9 +221,12 @@ def train_fn(
     specs: TrainingSpecification,
 ):
     params = eqx.filter(flow, eqx.is_array)
-    optim = optax.adam(get_scheduler(specs))
+    optim = optax.adam(get_scheduler(specs), b1=0.999, b2=0.9999)
 
     opt_state = optim.init(params)  # type: ignore
+    opt_state = lenses.bind(opt_state)[0].nu.modify(
+        partial(jax.tree_map, lambda x: jnp.ones_like(x))
+    )
 
     def init_losses(
         key: KeyArray,

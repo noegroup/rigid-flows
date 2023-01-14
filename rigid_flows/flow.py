@@ -315,7 +315,7 @@ class QuatUpdate(eqx.Module):
         num_blocks = 2
         self.net = RotConditioner(
             seq_len,
-            num_out,
+            2 * num_out,
             num_aux,
             num_heads,
             num_channels,
@@ -334,7 +334,9 @@ class QuatUpdate(eqx.Module):
         """
         out = self.net(input.pos, input.aux)
 
-        reflection = out
+        reflection, gate = jnp.split(out, 2, axis=-1)
+
+        reflection = reflection * jax.nn.sigmoid(gate - 4.0)
 
         reflection = reflection.reshape(input.rot.shape)
         reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.99)(
@@ -401,7 +403,7 @@ class AuxUpdate(eqx.Module):
         num_blocks = 2
         self.net = AuxConditioner(
             seq_len,
-            num_out,
+            2 * num_out,
             num_heads,
             num_channels,
             num_blocks,
@@ -418,6 +420,9 @@ class AuxUpdate(eqx.Module):
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
         out = self.net(input.pos, input.rot).reshape(input.aux.shape[0], -1)
+        out, gate = jnp.split(out, 2, axis=-1)
+        out = out * jax.nn.sigmoid(gate - 4.0)
+
         shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
         return shift, scale
 
@@ -470,7 +475,7 @@ class PosUpdate(eqx.Module):
 
         self.net = PosConditioner(
             seq_len,
-            num_out,
+            2 * num_out,
             num_aux,
             num_heads,
             num_channels,
@@ -479,9 +484,10 @@ class PosUpdate(eqx.Module):
         )
 
     def params(self, input: RigidWithAuxiliary):
-        params = self.net(input.aux, input.rot).reshape(
-            *input.pos.shape, 3 * self.num_bins + 1
-        )
+        params = self.net(input.aux, input.rot)
+        params = params.reshape(*input.pos.shape, -1)
+        params, gate = jnp.split(params, 2, axis=-1)
+        params = params * jax.nn.sigmoid(gate - 4.0)
         return params
 
     def forward(

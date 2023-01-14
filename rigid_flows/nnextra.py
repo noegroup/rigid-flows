@@ -6,7 +6,7 @@ from flox.util import key_chain
 
 
 def zero_param(x):
-    # return x
+    return x
     if eqx.is_array(x):
         return jnp.zeros_like(x)
     else:
@@ -104,7 +104,10 @@ class PosConditioner(eqx.Module):
         ]
 
         self.decoder = jax.tree_map(
-            zero_param, eqx.nn.Linear(inp, out, use_bias=True, key=next(chain))
+            zero_param, eqx.nn.Sequential([
+                eqx.nn.LayerNorm((inp,), elementwise_affine=True),
+                eqx.nn.Linear(inp, out, use_bias=True, key=next(chain))
+            ])
         )
 
     def __call__(self, aux, rot):
@@ -204,7 +207,10 @@ class AuxConditioner(eqx.Module):
             for _ in range(num_blocks)
         ]
         self.decoder = jax.tree_map(
-            zero_param, eqx.nn.Linear(inp, out, use_bias=True, key=next(chain))
+            zero_param, eqx.nn.Sequential([
+                eqx.nn.LayerNorm((inp,), elementwise_affine=True),
+                eqx.nn.Linear(inp, out, use_bias=True, key=next(chain))
+            ])
         )
 
     def __call__(self, pos, rot):
@@ -292,7 +298,7 @@ class RotationConditionerBlock(eqx.Module):
 class RotConditioner(eqx.Module):
 
     blocks: list[tuple[RotationConditionerBlock, eqx.nn.LayerNorm]]
-    decoder: eqx.nn.Linear
+    decoder: eqx.nn.Sequential
 
     def __init__(
         self, inp, out, num_aux, num_heads, num_channels, num_blocks, *, key
@@ -311,7 +317,10 @@ class RotConditioner(eqx.Module):
             for _ in range(num_blocks)
         ]
         self.decoder = jax.tree_map(
-            zero_param, eqx.nn.Linear(inp, out, use_bias=True, key=next(chain))
+            zero_param, eqx.nn.Sequential([
+                eqx.nn.LayerNorm((inp,), elementwise_affine=True),
+                eqx.nn.Linear(inp, out, use_bias=True, key=next(chain))
+            ])
         )
 
     def __call__(self, pos, aux):

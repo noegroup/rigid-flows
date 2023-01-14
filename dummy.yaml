@@ -94,7 +94,7 @@ train:
   - num_epochs: 3
     num_iters_per_epoch: 100
 
-    init_learning_rate: 1e-5
+    init_learning_rate: 1e-3
     target_learning_rate: 1e-5
 
     weight_nll: 0.

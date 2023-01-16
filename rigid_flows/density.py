@@ -33,7 +33,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         sys_specs: SystemSpecification,
         omm_model: OpenMMEnergyModel,
         aux_model: tfp.distributions.Distribution,
-        com_model: tfp.distributions.Distribution,
+        com_model: tfp.distributions.Distribution | None,
         data: PreprocessedData,
     ):
         self.aux_model = aux_model
@@ -70,7 +70,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 has_batch_dim=has_batch_dim,
             )
             results["omm"] = energy(pos)
-        if com:
+        if com and self.com_model is not None:
             data_com = inp.pos.mean(axis=(-2, -3))
             com_prob = self.com_model.log_prob(data_com)
             for _ in range(len(self.com_model.batch_shape)):
@@ -124,11 +124,14 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 next(chain), minval=0, maxval=len(self.data.pos), shape=()
             )
             box = SimulationBox(self.data.box[idx])
-            pos = self.data.pos[idx].reshape(self.omm_model.model.n_waters, self.omm_model.model.n_sites, 3)
+            pos = self.data.pos[idx].reshape(
+                self.omm_model.model.n_waters, self.omm_model.model.n_sites, 3
+            )
 
             aux = self.aux_model.sample(seed=next(chain))
-            com = self.com_model.sample(seed=next(chain))
-            pos = pos - pos.mean(axis=(0, 1), keepdims=True) + com[None, None]
+            if self.com_model is not None:
+                com = self.com_model.sample(seed=next(chain))
+                pos = pos - pos.mean(axis=(0, 1), keepdims=True) + com[None, None]
 
             force = None
             sign = jnp.sign(
@@ -170,13 +173,17 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         data = PreprocessedData.from_data(
             data,
             SimulationBox(jnp.diag(omm_model.model.box)),
+            sys_specs.fixed_com,
         )
 
         aux_model = tfp.distributions.Normal(
             jnp.zeros(auxiliary_shape), jnp.ones(auxiliary_shape)
         )
 
-        com_model = tfp.distributions.Normal(*data.estimate_com_stats())
+        if sys_specs.fixed_com:
+            com_model = None
+        else:
+            com_model = tfp.distributions.Normal(*data.estimate_com_stats())
 
         return OpenMMDensity(
             sys_specs=sys_specs,

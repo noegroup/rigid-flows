@@ -370,7 +370,10 @@ def compute_sample_energies(
     #     sample_positions, box
     # )
     omm_energies = energies["omm"]
-    com_energies = energies["com"]
+    if not target.sys_specs.fixed_com:
+        com_energies = energies["com"]
+    else:
+        com_energies = 0 * omm_energies #FIXME should work
     # target_energies = omm_energies + aux_energies
 
     return omm_energies, aux_energies, com_energies

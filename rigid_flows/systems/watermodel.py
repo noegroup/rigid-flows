@@ -342,7 +342,7 @@ class WaterModel:
 
         if toPBC:
             if self.is_box_orthorombic:
-                mypos = (pos / np.diagonal(av_box) % 1) * np.diagonal(av_box)
+                mypos = pos % np.diagonal(av_box)
             else:
                 raise NotImplementedError("only available for fixed orthorombic box")
         else:
@@ -418,7 +418,13 @@ class WaterModel:
         return traj
 
     def plot_rdf(
-        self, pos=None, box=None, selection="name == O", r_range=[0, 1], n_bins=None, **kwargs
+        self,
+        pos=None,
+        box=None,
+        selection="name == O",
+        r_range=[0, 1],
+        n_bins=None,
+        **kwargs,
     ):
         traj = self.get_mdtraj(pos, box)
         ij = self.mdtraj_topology.select_pairs(selection, selection)

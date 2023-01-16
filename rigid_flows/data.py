@@ -85,7 +85,7 @@ class PreprocessedData:
     stds: jnp.ndarray
 
     @staticmethod
-    def from_data(data: Data, box: SimulationBox) -> "PreprocessedData":
+    def from_data(data: Data, box: SimulationBox, fix_com: bool = False) -> "PreprocessedData":
         oxy = data.pos[:, :, 0]
 
         modes = jax.vmap(
@@ -101,6 +101,8 @@ class PreprocessedData:
         pos = modes[:, None] + geom.Torus(box.size).tangent(
             data.pos, data.pos - modes[:, None]
         )
+        if fix_com:
+            pos = pos - pos.mean(axis=(1,2), keepdims=True)+ pos.mean(axis=(0,1,2), keepdims=True)
 
         return PreprocessedData(pos, data.box, data.energy, data.force, modes, stds)
 

@@ -6,23 +6,17 @@ import equinox
 import equinox as eqx
 import jax
 import lenses
-from jax import Array
-from jax import numpy as jnp
-from jax_dataclasses import pytree_dataclass
-from jaxtyping import Float
-
 from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.impl import Affine
 from flox._src.geom.euclidean import inner, norm, unit
-from flox.flow import (
-    DoubleMoebius,
-    Pipe,
-    Transform,
-    Transformed,
-    VectorizedTransform,
-)
+from flox.flow import (DoubleMoebius, Pipe, Transform, Transformed,
+                       VectorizedTransform)
 from flox.util import key_chain, unpack
+from jax import Array
+from jax import numpy as jnp
+from jax_dataclasses import pytree_dataclass
+from jaxtyping import Float
 
 from .data import DataWithAuxiliary
 from .density import OpenMMDensity
@@ -40,6 +34,8 @@ Quaternion = Float[Array, "... 4"]
 Auxiliary = Float[Array, f"... AUX"]
 
 AtomRepresentation = Float[Array, "... MOL 4 3"]
+
+IDENTITY_FACTOR = 1  # 1e-2
 
 
 @pytree_dataclass(frozen=True)
@@ -69,17 +65,13 @@ def to_rigid(pos: AtomRepresentation) -> Transformed[RigidRepresentation]:
 
     ldj -= jnp.log(4 * d_OM**4 + d_OM**2) / 2
     return Transformed(
-        RigidRepresentation(
-            q, p, InternalCoordinates(d_OH1, d_OH2, a_HOH, d_OM, a_OM)
-        ),
+        RigidRepresentation(q, p, InternalCoordinates(d_OH1, d_OH2, a_HOH, d_OM, a_OM)),
         ldj,
     )
 
 
 def from_rigid(rp: RigidRepresentation) -> Transformed[AtomRepresentation]:
-    r_OM = rp.ics.d_OM * jnp.array(
-        [jnp.sin(rp.ics.a_OM), 0.0, jnp.cos(rp.ics.a_OM)]
-    )
+    r_OM = rp.ics.d_OM * jnp.array([jnp.sin(rp.ics.a_OM), 0.0, jnp.cos(rp.ics.a_OM)])
     r_OM = geom.qrot3d(rp.rot, r_OM)
     pos = rigid.to_euclidean(rp.rot, rp.pos, *astuple(rp.ics)[:3])
     ldj = rigid.to_euclidean_log_jacobian(rp.rot, rp.pos, *astuple(rp.ics)[:3])
@@ -89,14 +81,10 @@ def from_rigid(rp: RigidRepresentation) -> Transformed[AtomRepresentation]:
 
 
 class RigidTransform(Transform[AtomRepresentation, RigidRepresentation]):
-    def forward(
-        self, inp: AtomRepresentation
-    ) -> Transformed[RigidRepresentation]:
+    def forward(self, inp: AtomRepresentation) -> Transformed[RigidRepresentation]:
         return to_rigid(inp)
 
-    def inverse(
-        self, inp: RigidRepresentation
-    ) -> Transformed[AtomRepresentation]:
+    def inverse(self, inp: RigidRepresentation) -> Transformed[AtomRepresentation]:
         return from_rigid(inp)
 
 
@@ -192,9 +180,7 @@ def toggle_layer_stack(flow: Transform, toggle: bool) -> Transform:
         return LayerStackedPipe(flow.transforms, use_scan=toggle)
     elif isinstance(flow, Pipe):
         return Pipe(
-            tuple(
-                map(partial(toggle_layer_stack, toggle=toggle), flow.transforms)
-            )
+            tuple(map(partial(toggle_layer_stack, toggle=toggle), flow.transforms))
         )
     else:
         return flow
@@ -407,21 +393,17 @@ class QuatUpdate(eqx.Module):
         if len(aux.shape) == 1:
             aux = jnp.tile(aux[None], (pos.shape[0], 1))
         feats = jnp.concatenate([aux, pos], axis=-1)
-        out = self.net(feats)
+        out = self.net(feats) * IDENTITY_FACTOR
 
         reflection = out
 
         reflection = reflection.reshape(input.rot.shape)
-        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)(
-            reflection
-        )
+        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)(reflection)
         reflection = reflection
 
         return reflection
 
-    def forward(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def forward(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
         reflection = self.params(input)
         new, ldj = unpack(
@@ -429,9 +411,7 @@ class QuatUpdate(eqx.Module):
         )
         return Transformed(lenses.bind(input).rot.set(new), ldj)
 
-    def inverse(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def inverse(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
         reflection = self.params(input)
         new, ldj = unpack(
@@ -500,7 +480,7 @@ class AuxUpdate(eqx.Module):
         """
         pos = input.pos
         feats = jnp.concatenate([pos, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats).reshape(input.aux.shape[0], -1)
+        out = self.net(feats).reshape(input.aux.shape[0], -1) * IDENTITY_FACTOR
 
         shift_and_scale, low_rank = jnp.split(out, [2 * input.aux.shape[-1]], axis=-1)  # type: ignore
         shift, scale = jnp.split(shift_and_scale, 2, axis=-1)  # type: ignore
@@ -508,18 +488,14 @@ class AuxUpdate(eqx.Module):
         scale = scale.reshape(input.aux.shape)
         return shift, scale
 
-    def forward(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def forward(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
         shift, scale = self.params(input)
         pipe = Affine(shift, scale)
         aux, ldj = unpack(pipe.forward(input.aux))
         return Transformed(lenses.bind(input).aux.set(aux), ldj)
 
-    def inverse(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def inverse(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
         shift, scale = self.params(input)
         pipe = Affine(shift, scale)
@@ -591,7 +567,7 @@ class PosUpdate(eqx.Module):
             aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
 
         feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
-        out = self.net(feats).reshape(input.pos.shape[0], -1)
+        out = self.net(feats).reshape(input.pos.shape[0], -1) * IDENTITY_FACTOR
 
         shift_and_scale, low_rank = jnp.split(out, [2 * input.pos.shape[-1]], axis=-1)  # type: ignore
         shift, scale = jnp.split(shift_and_scale, 2, axis=-1)  # type: ignore
@@ -599,18 +575,14 @@ class PosUpdate(eqx.Module):
         scale = scale.reshape(input.pos.shape)
         return shift, scale
 
-    def forward(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def forward(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
         shift, scale = self.params(input)
         pipe = Affine(shift, scale)
         pos, ldj = unpack(pipe.forward(input.pos))
         return Transformed(lenses.bind(input).pos.set(pos), ldj)
 
-    def inverse(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def inverse(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
         shift, scale = self.params(input)
         pipe = Affine(shift, scale)
@@ -622,24 +594,16 @@ class EuclideanToRigidTransform(equinox.Module):
 
     mean: jnp.ndarray
 
-    def forward(
-        self, input: DataWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
-        rigid, ldj = unpack(
-            VectorizedTransform(RigidTransform()).forward(input.pos)
-        )
+    def forward(self, input: DataWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
+        rigid, ldj = unpack(VectorizedTransform(RigidTransform()).forward(input.pos))
         pos = rigid.pos - self.mean
         return Transformed(
-            RigidWithAuxiliary(
-                rigid.rot, pos, rigid.ics, input.aux, input.box
-            ),
+            RigidWithAuxiliary(rigid.rot, pos, rigid.ics, input.aux, input.box),
             ldj,
         )
 
-    def inverse(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[DataWithAuxiliary]:
-        
+    def inverse(self, input: RigidWithAuxiliary) -> Transformed[DataWithAuxiliary]:
+
         pos = input.pos + self.mean
         rigid = jax.vmap(RigidRepresentation)(input.rot, pos, input.ics)
         pos, ldj = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))

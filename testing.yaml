@@ -67,6 +67,7 @@ model:
     store_forces: false
     forces_path: null
     fixed_box: true
+    fixed_com: true
 
     softcore_cutoff: null
     softcore_potential: "linear"
@@ -82,6 +83,7 @@ model:
     store_forces: false
     forces_path: null
     fixed_box: true
+    fixed_com: true
 
     softcore_cutoff: null
     softcore_potential: "linear"
@@ -94,8 +96,8 @@ train:
   - num_epochs: 2
     num_iters_per_epoch: 1000
 
-    init_learning_rate: 1e-2
-    target_learning_rate: 1e-3
+    init_learning_rate: 1e-3
+    target_learning_rate: 1e-4
 
     weight_nll: 0.
 
@@ -110,7 +112,7 @@ train:
     weight_vg_model: 0.
     weight_vg_target: 0.
   
-    num_samples: 32
+    num_samples: 16
 
     use_grad_clipping: false
     grad_clipping_ratio: 1.

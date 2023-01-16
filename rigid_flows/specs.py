@@ -110,6 +110,7 @@ class SystemSpecification:
     store_forces: bool
     forces_path: str | None
     fixed_box: bool
+    fixed_com: bool
 
     softcore_cutoff: float | None
     softcore_potential: str | None

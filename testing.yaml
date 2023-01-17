@@ -23,7 +23,7 @@ model:
   pretrained_model_path: null # runs/2022-12-13_19:18:20/training_stage_0/epoch_1/model.eqx 
 
   # shape of the auxiliary variables
-  auxiliary_shape: [16, 3]
+  auxiliary_shape: null #[16, 3]
 
   # definition of the flow model
   flow:
@@ -94,9 +94,9 @@ train:
 
   # first stage: only likelihood
   - num_epochs: 2
-    num_iters_per_epoch: 1000
+    num_iters_per_epoch: 100
 
-    init_learning_rate: 1e-3
+    init_learning_rate: 1e-5
     target_learning_rate: 1e-4
 
     weight_nll: 0.
@@ -112,7 +112,7 @@ train:
     weight_vg_model: 0.
     weight_vg_target: 0.
   
-    num_samples: 16
+    num_samples: 128
 
     use_grad_clipping: false
     grad_clipping_ratio: 1.

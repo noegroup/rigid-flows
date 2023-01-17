@@ -10,8 +10,13 @@ from flox import geom
 from flox._src.flow import rigid
 from flox._src.flow.impl import Affine
 from flox._src.geom.euclidean import inner, norm, unit
-from flox.flow import (DoubleMoebius, Pipe, Transform, Transformed,
-                       VectorizedTransform)
+from flox.flow import (
+    DoubleMoebius,
+    Pipe,
+    Transform,
+    Transformed,
+    VectorizedTransform,
+)
 from flox.util import key_chain, unpack
 from jax import Array
 from jax import numpy as jnp
@@ -35,7 +40,7 @@ Auxiliary = Float[Array, f"... AUX"]
 
 AtomRepresentation = Float[Array, "... MOL 4 3"]
 
-IDENTITY_FACTOR = 1  # 1e-2
+IDENTITY_FACTOR = 1e-2
 
 
 @pytree_dataclass(frozen=True)
@@ -65,13 +70,17 @@ def to_rigid(pos: AtomRepresentation) -> Transformed[RigidRepresentation]:
 
     ldj -= jnp.log(4 * d_OM**4 + d_OM**2) / 2
     return Transformed(
-        RigidRepresentation(q, p, InternalCoordinates(d_OH1, d_OH2, a_HOH, d_OM, a_OM)),
+        RigidRepresentation(
+            q, p, InternalCoordinates(d_OH1, d_OH2, a_HOH, d_OM, a_OM)
+        ),
         ldj,
     )
 
 
 def from_rigid(rp: RigidRepresentation) -> Transformed[AtomRepresentation]:
-    r_OM = rp.ics.d_OM * jnp.array([jnp.sin(rp.ics.a_OM), 0.0, jnp.cos(rp.ics.a_OM)])
+    r_OM = rp.ics.d_OM * jnp.array(
+        [jnp.sin(rp.ics.a_OM), 0.0, jnp.cos(rp.ics.a_OM)]
+    )
     r_OM = geom.qrot3d(rp.rot, r_OM)
     pos = rigid.to_euclidean(rp.rot, rp.pos, *astuple(rp.ics)[:3])
     ldj = rigid.to_euclidean_log_jacobian(rp.rot, rp.pos, *astuple(rp.ics)[:3])
@@ -81,10 +90,14 @@ def from_rigid(rp: RigidRepresentation) -> Transformed[AtomRepresentation]:
 
 
 class RigidTransform(Transform[AtomRepresentation, RigidRepresentation]):
-    def forward(self, inp: AtomRepresentation) -> Transformed[RigidRepresentation]:
+    def forward(
+        self, inp: AtomRepresentation
+    ) -> Transformed[RigidRepresentation]:
         return to_rigid(inp)
 
-    def inverse(self, inp: RigidRepresentation) -> Transformed[AtomRepresentation]:
+    def inverse(
+        self, inp: RigidRepresentation
+    ) -> Transformed[AtomRepresentation]:
         return from_rigid(inp)
 
 
@@ -180,7 +193,9 @@ def toggle_layer_stack(flow: Transform, toggle: bool) -> Transform:
         return LayerStackedPipe(flow.transforms, use_scan=toggle)
     elif isinstance(flow, Pipe):
         return Pipe(
-            tuple(map(partial(toggle_layer_stack, toggle=toggle), flow.transforms))
+            tuple(
+                map(partial(toggle_layer_stack, toggle=toggle), flow.transforms)
+            )
         )
     else:
         return flow
@@ -354,7 +369,7 @@ class QuatUpdate(eqx.Module):
 
     def __init__(
         self,
-        auxiliary_shape: tuple[int, ...],
+        auxiliary_shape: tuple[int, ...] | None,
         num_pos: int = 3,
         *,
         key: KeyArray,
@@ -372,8 +387,12 @@ class QuatUpdate(eqx.Module):
             num_blocks (int, optional): number of transformer blocks. Defaults to 1.
             key (KeyArray): PRNGKey for param initialization
         """
+        if auxiliary_shape is not None:
+            num_inp = (auxiliary_shape[-1] + num_pos,)  # * 2,
+        else:
+            num_inp = num_pos
         self.net = MLPMixer(
-            num_inp=auxiliary_shape[-1] + num_pos,  # * 2,
+            num_inp=num_inp,
             num_out=4,  # num_rot,
             key=key,
             **kwargs,
@@ -388,22 +407,30 @@ class QuatUpdate(eqx.Module):
         Returns:
             Array: the parameter (reflection) of the double moebius transform
         """
-        aux = input.aux
+
         pos = input.pos
-        if len(aux.shape) == 1:
-            aux = jnp.tile(aux[None], (pos.shape[0], 1))
-        feats = jnp.concatenate([aux, pos], axis=-1)
+        if input.aux is not None:
+            aux = input.aux
+            if len(aux.shape) == 1:
+                aux = jnp.tile(aux[None], (pos.shape[0], 1))
+            feats = jnp.concatenate([aux, pos], axis=-1)
+        else:
+            feats = pos
         out = self.net(feats) * IDENTITY_FACTOR
 
         reflection = out
 
         reflection = reflection.reshape(input.rot.shape)
-        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)(reflection)
+        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)(
+            reflection
+        )
         reflection = reflection
 
         return reflection
 
-    def forward(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
+    def forward(
+        self, input: RigidWithAuxiliary
+    ) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
         reflection = self.params(input)
         new, ldj = unpack(
@@ -411,7 +438,9 @@ class QuatUpdate(eqx.Module):
         )
         return Transformed(lenses.bind(input).rot.set(new), ldj)
 
-    def inverse(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
+    def inverse(
+        self, input: RigidWithAuxiliary
+    ) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
         reflection = self.params(input)
         new, ldj = unpack(
@@ -488,14 +517,18 @@ class AuxUpdate(eqx.Module):
         scale = scale.reshape(input.aux.shape)
         return shift, scale
 
-    def forward(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
+    def forward(
+        self, input: RigidWithAuxiliary
+    ) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
         shift, scale = self.params(input)
         pipe = Affine(shift, scale)
         aux, ldj = unpack(pipe.forward(input.aux))
         return Transformed(lenses.bind(input).aux.set(aux), ldj)
 
-    def inverse(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
+    def inverse(
+        self, input: RigidWithAuxiliary
+    ) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
         shift, scale = self.params(input)
         pipe = Affine(shift, scale)
@@ -516,7 +549,7 @@ class PosUpdate(eqx.Module):
 
     def __init__(
         self,
-        auxiliary_shape: tuple[int, ...],
+        auxiliary_shape: tuple[int, ...] | None,
         num_dims: int,
         num_pos: int,
         num_low_rank: int,
@@ -543,8 +576,12 @@ class PosUpdate(eqx.Module):
         self.symmetrizer = QuatEncoder(num_dims, key=next(chain))
 
         num_out = (2 + 2 * num_low_rank) * num_pos
+        if auxiliary_shape is not None:
+            num_inp = num_dims + auxiliary_shape[-1]
+        else:
+            num_inp = num_dims
         self.net = MLPMixer(
-            num_inp=num_dims + auxiliary_shape[-1],
+            num_inp=num_inp,
             num_out=num_out,
             key=next(chain),
             **kwargs,
@@ -562,11 +599,14 @@ class PosUpdate(eqx.Module):
         Returns:
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
-        aux = input.aux
-        if len(aux.shape) == 1:
-            aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
+        if input.aux is not None:
+            aux = input.aux
+            if len(aux.shape) == 1:
+                aux = jnp.tile(aux[None], (input.pos.shape[0], 1))
 
-        feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
+            feats = jnp.concatenate([aux, self.symmetrizer(input.rot)], axis=-1)
+        else:
+            feats = self.symmetrizer(input.rot)
         out = self.net(feats).reshape(input.pos.shape[0], -1) * IDENTITY_FACTOR
 
         shift_and_scale, low_rank = jnp.split(out, [2 * input.pos.shape[-1]], axis=-1)  # type: ignore
@@ -575,14 +615,18 @@ class PosUpdate(eqx.Module):
         scale = scale.reshape(input.pos.shape)
         return shift, scale
 
-    def forward(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
+    def forward(
+        self, input: RigidWithAuxiliary
+    ) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
         shift, scale = self.params(input)
         pipe = Affine(shift, scale)
         pos, ldj = unpack(pipe.forward(input.pos))
         return Transformed(lenses.bind(input).pos.set(pos), ldj)
 
-    def inverse(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
+    def inverse(
+        self, input: RigidWithAuxiliary
+    ) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
         shift, scale = self.params(input)
         pipe = Affine(shift, scale)
@@ -594,15 +638,21 @@ class EuclideanToRigidTransform(equinox.Module):
 
     mean: jnp.ndarray
 
-    def forward(self, input: DataWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
-        rigid, ldj = unpack(VectorizedTransform(RigidTransform()).forward(input.pos))
+    def forward(
+        self, input: DataWithAuxiliary
+    ) -> Transformed[RigidWithAuxiliary]:
+        rigid, ldj = unpack(
+            VectorizedTransform(RigidTransform()).forward(input.pos)
+        )
         pos = rigid.pos - self.mean
         return Transformed(
             RigidWithAuxiliary(rigid.rot, pos, rigid.ics, input.aux, input.box),
             ldj,
         )
 
-    def inverse(self, input: RigidWithAuxiliary) -> Transformed[DataWithAuxiliary]:
+    def inverse(
+        self, input: RigidWithAuxiliary
+    ) -> Transformed[DataWithAuxiliary]:
 
         pos = input.pos + self.mean
         rigid = jax.vmap(RigidRepresentation)(input.rot, pos, input.ics)
@@ -617,7 +667,7 @@ class EuclideanToRigidTransform(equinox.Module):
 
 def _coupling(
     key: KeyArray,
-    auxiliary_shape: tuple[int, ...],
+    auxiliary_shape: tuple[int, ...] | None,
     specs: CouplingSpecification,
 ) -> Transform[RigidWithAuxiliary, RigidWithAuxiliary]:
     """Creates a coupling block consisting of:
@@ -636,13 +686,14 @@ def _coupling(
     chain = key_chain(key)
     blocks = []
     for _ in range(specs.num_repetitions):
-        aux_block = [
-            AuxUpdate(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.auxiliary_update),
-                key=next(chain),
-            )
-        ]
+        if auxiliary_shape is not None:
+            aux_block = [
+                AuxUpdate(
+                    auxiliary_shape=auxiliary_shape,
+                    **asdict(specs.auxiliary_update),
+                    key=next(chain),
+                )
+            ]
         pos_block = [
             PosUpdate(
                 auxiliary_shape=auxiliary_shape,
@@ -653,26 +704,39 @@ def _coupling(
 
         if specs.act_norm:
             pos_block += [ActNorm(lenses.lens.pos)]
-            aux_block += [ActNorm(lenses.lens.aux)]
+            if auxiliary_shape is not None:
+                aux_block += [ActNorm(lenses.lens.aux)]
 
-        sub_block = Pipe(
-            [
-                *aux_block,
-                *pos_block,
-                QuatUpdate(
-                    auxiliary_shape=auxiliary_shape,
-                    **asdict(specs.quaternion_update),
-                    key=next(chain),
-                ),
-            ]
-        )
+        if auxiliary_shape is not None:
+            sub_block = Pipe(
+                [
+                    *aux_block,
+                    *pos_block,
+                    QuatUpdate(
+                        auxiliary_shape=auxiliary_shape,
+                        **asdict(specs.quaternion_update),
+                        key=next(chain),
+                    ),
+                ]
+            )
+        else:
+            sub_block = Pipe(
+                [
+                    *pos_block,
+                    QuatUpdate(
+                        auxiliary_shape=auxiliary_shape,
+                        **asdict(specs.quaternion_update),
+                        key=next(chain),
+                    ),
+                ]
+            )
         blocks.append(sub_block)
     return Pipe(blocks)
 
 
 def build_flow(
     key: KeyArray,
-    auxiliary_shape: tuple[int, ...],
+    auxiliary_shape: tuple[int, ...] | None,
     specs: FlowSpecification,
     base: OpenMMDensity,
 ) -> Pipe[DataWithAuxiliary, DataWithAuxiliary]:

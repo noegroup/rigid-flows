@@ -5,10 +5,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import tensorflow_probability.substrates.jax as tfp  # type: ignore
-from jax import Array
-
 from flox.flow import Transformed
 from flox.util import key_chain
+from jax import Array
 
 from .data import Data, DataWithAuxiliary, PreprocessedData
 from .specs import SystemSpecification
@@ -32,7 +31,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         self,
         sys_specs: SystemSpecification,
         omm_model: OpenMMEnergyModel,
-        aux_model: tfp.distributions.Distribution,
+        aux_model: tfp.distributions.Distribution | None,
         com_model: tfp.distributions.Distribution | None,
         data: PreprocessedData,
     ):
@@ -76,7 +75,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             for _ in range(len(self.com_model.batch_shape)):
                 com_prob = com_prob.sum(-1)
             results["com"] = -com_prob
-        if aux:
+        if aux and self.aux_model is not None:
             aux_prob = self.aux_model.log_prob(inp.aux)
             for _ in range(len(self.aux_model.batch_shape)):
                 aux_prob = aux_prob.sum(-1)
@@ -128,10 +127,15 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 self.omm_model.model.n_waters, self.omm_model.model.n_sites, 3
             )
 
-            aux = self.aux_model.sample(seed=next(chain))
+            if self.aux_model is None:
+                aux = None
+            else:
+                aux = self.aux_model.sample(seed=next(chain))
             if self.com_model is not None:
                 com = self.com_model.sample(seed=next(chain))
-                pos = pos - pos.mean(axis=(0, 1), keepdims=True) + com[None, None]
+                pos = (
+                    pos - pos.mean(axis=(0, 1), keepdims=True) + com[None, None]
+                )
 
             force = None
             sign = jnp.sign(
@@ -146,7 +150,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
     @staticmethod
     def from_specs(
-        auxiliary_shape: tuple[int, ...],
+        auxiliary_shape: tuple[int, ...] | None,
         sys_specs: SystemSpecification,
     ):
 
@@ -176,9 +180,12 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             sys_specs.fixed_com,
         )
 
-        aux_model = tfp.distributions.Normal(
-            jnp.zeros(auxiliary_shape), jnp.ones(auxiliary_shape)
-        )
+        if auxiliary_shape is None:
+            aux_model = None
+        else:
+            aux_model = tfp.distributions.Normal(
+                jnp.zeros(auxiliary_shape), jnp.ones(auxiliary_shape)
+            )
 
         if sys_specs.fixed_com:
             com_model = None

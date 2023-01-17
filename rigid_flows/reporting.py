@@ -12,16 +12,15 @@ import jax
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf  # type: ignore
+from flox._src.flow.api import Inverted, Transform, Transformed, bind
+from flox._src.flow.sampling import Sampler
+from flox._src.util.jax import key_chain
+from flox._src.util.misc import unpack
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
-
-from flox._src.flow.api import Inverted, Transform, Transformed, bind
-from flox._src.flow.sampling import Sampler
-from flox._src.util.jax import key_chain
-from flox._src.util.misc import unpack
 
 from .data import DataWithAuxiliary
 from .density import KeyArray, OpenMMDensity
@@ -358,10 +357,6 @@ def compute_sample_energies(
         samples.obj, omm=True, aux=True, com=True, has_batch_dim=True
     )
 
-    aux_energies = energies["aux"]
-    # aux_energies = -target.aux_model.log_prob(samples.obj.aux)
-    # aux_energies = aux_energies.reshape(aux_energies.shape[0], -1).sum(axis=-1)
-
     # sample_positions = np.array(samples.obj.pos).reshape(
     #     samples.obj.pos.shape[0], -1, 3
     # )
@@ -370,10 +365,18 @@ def compute_sample_energies(
     #     sample_positions, box
     # )
     omm_energies = energies["omm"]
+
+    if samples.obj.aux is None:
+        aux_energies = 0 * omm_energies  # FIXME should work
+    else:
+        aux_energies = energies["aux"]
+    # aux_energies = -target.aux_model.log_prob(samples.obj.aux)
+    # aux_energies = aux_energies.reshape(aux_energies.shape[0], -1).sum(axis=-1)
+
     if not target.sys_specs.fixed_com:
         com_energies = energies["com"]
     else:
-        com_energies = 0 * omm_energies #FIXME should work
+        com_energies = 0 * omm_energies  # FIXME should work
     # target_energies = omm_energies + aux_energies
 
     return omm_energies, aux_energies, com_energies
@@ -523,15 +526,15 @@ def report_model(
 
     # plot quaternion histograms
     if specs.plot_quaternions is not None:
-        data_quats = jax.vmap(EuclideanToRigidTransform(target.data.modes).forward)(
-            data_samples.obj
-        ).obj.rot
-        model_quats = jax.vmap(EuclideanToRigidTransform(base.data.modes).forward)(
-            model_samples.obj
-        ).obj.rot
-        prior_quats = jax.vmap(EuclideanToRigidTransform(base.data.modes).forward)(
-            prior_samples.obj
-        ).obj.rot
+        data_quats = jax.vmap(
+            EuclideanToRigidTransform(target.data.modes).forward
+        )(data_samples.obj).obj.rot
+        model_quats = jax.vmap(
+            EuclideanToRigidTransform(base.data.modes).forward
+        )(model_samples.obj).obj.rot
+        prior_quats = jax.vmap(
+            EuclideanToRigidTransform(base.data.modes).forward
+        )(prior_samples.obj).obj.rot
         logging.info(f"plotting quaternions")
         fig = plot_quaternions(
             data_quats, model_quats, prior_quats, specs.plot_quaternions

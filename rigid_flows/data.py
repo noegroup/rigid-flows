@@ -117,7 +117,7 @@ class DataWithAuxiliary:
     """Data augmented with auxilaries and quaternion signs."""
 
     pos: Array
-    aux: Array
+    aux: Array | None
     sign: Array
     box: SimulationBox
     force: jnp.ndarray | None

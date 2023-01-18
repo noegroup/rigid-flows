@@ -122,7 +122,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             idx = jax.random.randint(
                 next(chain), minval=0, maxval=len(self.data.pos), shape=()
             )
-            box = SimulationBox(self.data.box[idx])
+            # box = SimulationBox(self.data.box[idx])
             pos = self.data.pos[idx].reshape(-1, 4, 3)
             pos = boxify(pos, self.box)
 
@@ -135,7 +135,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 )
             )
 
-            sample = DataWithAuxiliary(pos, aux, sign, box, force)
+            sample = DataWithAuxiliary(pos, aux, sign, self.box, force)
             energy = self.potential(sample)
             return Transformed(sample, energy)
 

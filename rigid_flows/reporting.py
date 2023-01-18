@@ -355,8 +355,12 @@ def compute_sample_energies(
     energies = target.compute_energies(
         samples.obj, omm=True, aux=True, has_batch_dim=True
     )
-    aux_energies = energies["aux"]
+    # aux_energies = energies["aux"]
     omm_energies = energies["omm"]
+    if samples.obj.aux is None:
+        aux_energies = 0 * omm_energies  # FIXME should work
+    else:
+        aux_energies = energies["aux"]
     return omm_energies, aux_energies
 
 

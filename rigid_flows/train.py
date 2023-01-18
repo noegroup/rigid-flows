@@ -341,6 +341,7 @@ def run_training_stage(
     system_specs: SystemSpecification,
     reporter: Reporter,
     tot_iter: int,
+    loss_reporter: list | None = None,
 ) -> Transform[DataWithAuxiliary, DataWithAuxiliary]:
 
     chain = key_chain(key)
@@ -360,16 +361,19 @@ def run_training_stage(
             epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
             pbar = tqdm(
                 range(training_specs.num_iters_per_epoch),
-                desc=f"Epoch: {num_epoch}",
+                desc=f"Epoch: {1+num_epoch}/{training_specs.num_epochs}",
             )
 
             for _ in pbar:
                 loss, flow, opt_state, report = step(
                     next(chain), flow, opt_state
                 )
+                pbar.set_postfix({"loss": loss})
                 tf.summary.scalar(
                     f"loss/total/{reporter.scope}", loss, tot_iter
                 )
+                if loss_reporter is not None:
+                    loss_reporter.append(loss.item())
                 for name, val in report.items():
                     tf.summary.scalar(f"loss/{name}", val, tot_iter)
 

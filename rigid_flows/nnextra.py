@@ -5,14 +5,6 @@ import jax.numpy as jnp
 from flox.util import key_chain
 
 
-def zero_param(x):
-    return x
-    if eqx.is_array(x):
-        return jnp.zeros_like(x)
-    else:
-        return x
-
-
 class PositionConditionerBlock(eqx.Module):
 
     nodes_kq: eqx.nn.Linear
@@ -92,25 +84,19 @@ class PosConditioner(eqx.Module):
         chain = key_chain(key)
         self.blocks = [
             (
-                jax.tree_map(
-                    zero_param,
-                    PositionConditionerBlock(
-                        inp, num_aux, num_heads, num_channels, key=next(chain)
-                    ),
+                PositionConditionerBlock(
+                    inp, num_aux, num_heads, num_channels, key=next(chain)
                 ),
                 eqx.nn.LayerNorm((inp,), elementwise_affine=True),
             )
             for _ in range(num_blocks)
         ]
 
-        self.decoder = jax.tree_map(
-            zero_param,
-            eqx.nn.Sequential(
-                [
-                    eqx.nn.LayerNorm((inp,), elementwise_affine=True),
-                    eqx.nn.Linear(inp, out, use_bias=True, key=next(chain)),
-                ]
-            ),
+        self.decoder = eqx.nn.Sequential(
+            [
+                eqx.nn.LayerNorm((inp,), elementwise_affine=True),
+                eqx.nn.Linear(inp, out, use_bias=True, key=next(chain)),
+            ]
         )
 
     def __call__(self, aux, rot):
@@ -199,24 +185,18 @@ class AuxConditioner(eqx.Module):
         chain = key_chain(key)
         self.blocks = [
             (
-                jax.tree_map(
-                    zero_param,
-                    AuxiliaryConditionerBlock(
-                        inp, num_heads, num_channels, key=next(chain)
-                    ),
+                AuxiliaryConditionerBlock(
+                    inp, num_heads, num_channels, key=next(chain)
                 ),
                 eqx.nn.LayerNorm((inp,), elementwise_affine=True),
             )
             for _ in range(num_blocks)
         ]
-        self.decoder = jax.tree_map(
-            zero_param,
-            eqx.nn.Sequential(
-                [
-                    eqx.nn.LayerNorm((inp,), elementwise_affine=True),
-                    eqx.nn.Linear(inp, out, use_bias=True, key=next(chain)),
-                ]
-            ),
+        self.decoder = eqx.nn.Sequential(
+            [
+                eqx.nn.LayerNorm((inp,), elementwise_affine=True),
+                eqx.nn.Linear(inp, out, use_bias=True, key=next(chain)),
+            ]
         )
 
     def __call__(self, pos, rot):
@@ -312,24 +292,18 @@ class RotConditioner(eqx.Module):
         chain = key_chain(key)
         self.blocks = [
             (
-                jax.tree_map(
-                    zero_param,
-                    RotationConditionerBlock(
-                        inp, num_aux, num_heads, num_channels, key=next(chain)
-                    ),
+                RotationConditionerBlock(
+                    inp, num_aux, num_heads, num_channels, key=next(chain)
                 ),
                 eqx.nn.LayerNorm((inp,), elementwise_affine=True),
             )
             for _ in range(num_blocks)
         ]
-        self.decoder = jax.tree_map(
-            zero_param,
-            eqx.nn.Sequential(
-                [
-                    eqx.nn.LayerNorm((inp,), elementwise_affine=True),
-                    eqx.nn.Linear(inp, out, use_bias=True, key=next(chain)),
-                ]
-            ),
+        self.decoder = eqx.nn.Sequential(
+            [
+                eqx.nn.LayerNorm((inp,), elementwise_affine=True),
+                eqx.nn.Linear(inp, out, use_bias=True, key=next(chain)),
+            ]
         )
 
     def __call__(self, pos, aux):

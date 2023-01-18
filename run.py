@@ -58,8 +58,8 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
         next(chain),
         specs.model.auxiliary_shape,
         specs.model.flow,
-        base,
-        target,
+        # base,
+        # target,
     )
 
     logging.info(f"Initializing ActNorm")
@@ -98,6 +98,7 @@ def train(
     target: OpenMMDensity,
     flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
     tot_iter: int,
+    loss_reporter: list | None = None,
 ) -> Transform[DataWithAuxiliary, DataWithAuxiliary]:
     chain = key_chain(key)
     repo = git.Repo(search_parent_directories=True)
@@ -126,6 +127,7 @@ def train(
             specs.model.target,
             reporter.with_scope(f"training_stage_{stage}"),
             tot_iter,
+            loss_reporter,
         )
         tot_iter += train_spec.num_iterations
     return flow

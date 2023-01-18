@@ -132,7 +132,7 @@ class WaterModel:
         self._positions = np.array(positions)
         self._box = np.array(box)
         self.is_box_orthorombic = not np.count_nonzero(
-            box - np.diag(np.diagonal(box))
+            box - np.diag(np.diag(box))
         )
 
         self.n_waters = n_waters
@@ -160,7 +160,7 @@ class WaterModel:
         self.topology.setPeriodicBoxVectors(box)
         self.system.setDefaultPeriodicBoxVectors(*box)
         self.is_box_orthorombic = not np.count_nonzero(
-            box - np.diag(np.diagonal(box))
+            box - np.diag(np.diag(box))
         )
 
     @staticmethod
@@ -368,7 +368,7 @@ class WaterModel:
 
         if toPBC:
             if self.is_box_orthorombic:
-                mypos = (pos / np.diagonal(av_box) % 1) * np.diagonal(av_box)
+                mypos = pos % np.diagonal(av_box)
             else:
                 raise NotImplementedError(
                     "only available for fixed orthorombic box"
@@ -458,13 +458,14 @@ class WaterModel:
         self,
         pos=None,
         box=None,
-        r_range=[0, 1],
         selection="name == O",
+        r_range=[0, 1],
+        n_bins=None,
         **kwargs,
     ):
         traj = self.get_mdtraj(pos, box)
         ij = self.mdtraj_topology.select_pairs(selection, selection)
-        rdf = md.compute_rdf(traj, ij, r_range=r_range)
+        rdf = md.compute_rdf(traj, ij, r_range=r_range, n_bins=n_bins)
 
         plt.plot(*rdf, **kwargs)
         plt.ylabel("g(r)")

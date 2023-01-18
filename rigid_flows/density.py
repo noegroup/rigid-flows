@@ -40,12 +40,10 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         self,
         sys_specs: SystemSpecification,
         omm_model: OpenMMEnergyModel,
-        aux_model: tfp.distributions.Distribution,
-        com_model: tfp.distributions.Distribution,
+        aux_model: tfp.distributions.Distribution | None,
         data: PreprocessedData,
     ):
         self.aux_model = aux_model
-        self.com_model = com_model
         self.sys_specs = sys_specs
         self.omm_model = omm_model
         self.data = data
@@ -78,7 +76,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 has_batch_dim=has_batch_dim,
             )
             results["omm"] = energy(pos) + jnp.log(self.box.size).sum()
-        if aux:
+        if aux and self.aux_model is not None:
             aux_prob = self.aux_model.log_prob(inp.aux)
             for _ in range(len(self.aux_model.batch_shape)):
                 aux_prob = aux_prob.sum(-1)
@@ -130,7 +128,10 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             pos = boxify(pos, self.box)
             pos = pos / self.box.size
 
-            aux = self.aux_model.sample(seed=next(chain))
+            if self.aux_model is None:
+                aux = None
+            else:
+                aux = self.aux_model.sample(seed=next(chain))
 
             force = None
             sign = jnp.sign(
@@ -147,7 +148,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
     @staticmethod
     def from_specs(
-        auxiliary_shape: tuple[int, ...],
+        auxiliary_shape: tuple[int, ...] | None,
         sys_specs: SystemSpecification,
     ):
 
@@ -175,16 +176,17 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             SimulationBox(jnp.diag(omm_model.model.box)),
         )
 
-        aux_model = tfp.distributions.Normal(
-            jnp.zeros(auxiliary_shape), jnp.ones(auxiliary_shape)
-        )
+        if auxiliary_shape is None:
+            aux_model = None
+        else:
+            aux_model = tfp.distributions.Normal(
+                jnp.zeros(auxiliary_shape), jnp.ones(auxiliary_shape)
+            )
 
-        com_model = tfp.distributions.Normal(*data.estimate_com_stats())
 
         return OpenMMDensity(
             sys_specs=sys_specs,
             omm_model=omm_model,
             aux_model=aux_model,
-            com_model=com_model,
             data=data,
         )

@@ -15,14 +15,6 @@ from flox.util import key_chain
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
 
 
-def zero_param(x):
-    # return x
-    if eqx.is_array(x):
-        return jnp.zeros_like(x)
-    else:
-        return x
-
-
 class QuatEncoder(eqx.Module):
     """Encodes a quaternion into a flip-invariant representation."""
 
@@ -35,9 +27,7 @@ class QuatEncoder(eqx.Module):
             num_out (int): number of dimensions of output representation.
             key (KeyArray): PRNG Key for layer initialization
         """
-        self.encoder = jax.tree_map(
-            zero_param, eqx.nn.Linear(4, num_out + 1, key=key)
-        )
+        self.encoder = eqx.nn.Linear(4, num_out + 1, key=key)
 
     def __call__(
         self, quat: Float[Array, "... num_mols 4"]
@@ -219,28 +209,22 @@ class MLPMixerLayer(eqx.Module):
         chain = key_chain(key)
         num_hidden = int(num_inp * expansion_factor)
 
-        self.dim_mixer = jax.tree_map(
-            zero_param,
-            eqx.nn.Sequential(
-                [
-                    eqx.nn.Linear(num_inp, num_hidden, key=next(chain)),
-                    eqx.nn.Lambda(activation),
-                    eqx.nn.Linear(num_hidden, num_inp, key=next(chain)),
-                ]
-            ),
+        self.dim_mixer = eqx.nn.Sequential(
+            [
+                eqx.nn.Linear(num_inp, num_hidden, key=next(chain)),
+                eqx.nn.Lambda(activation),
+                eqx.nn.Linear(num_hidden, num_inp, key=next(chain)),
+            ]
         )
         self.dim_norm = eqx.nn.LayerNorm(num_inp, elementwise_affine=True)
 
-        self.token_mixer = jax.tree_map(
-            zero_param,
-            eqx.nn.Sequential(
+        self.token_mixer = eqx.nn.Sequential(
                 [
                     eqx.nn.Linear(seq_len, num_hidden, key=next(chain)),
                     eqx.nn.Lambda(activation),
                     eqx.nn.Linear(num_hidden, seq_len, key=next(chain)),
                 ]
-            ),
-        )
+            )
         self.token_norm = eqx.nn.LayerNorm(num_inp, elementwise_affine=True)
 
     def __call__(self, input):
@@ -273,9 +257,7 @@ class MLPMixer(eqx.Module):
     ):
         chain = key_chain(key)
         num_hidden = int(num_inp * expansion_factor)
-        self.encoder = jax.tree_map(
-            zero_param, eqx.nn.Linear(num_inp, num_hidden, key=next(chain))
-        )
+        self.encoder = eqx.nn.Linear(num_inp, num_hidden, key=next(chain))
         self.mixers = LayerStacked(
             [
                 MLPMixerLayer(
@@ -288,9 +270,7 @@ class MLPMixer(eqx.Module):
                 for _ in range(num_blocks)
             ],
         )
-        self.decoder = jax.tree_map(
-            zero_param, eqx.nn.Linear(num_hidden, num_out, key=next(chain))
-        )
+        self.decoder = eqx.nn.Linear(num_hidden, num_out, key=next(chain))
         self.norm = eqx.nn.LayerNorm(num_hidden, elementwise_affine=True)
 
     def __call__(self, input):

@@ -234,7 +234,7 @@ class QuatUpdate(eqx.Module):
 
     def __init__(
         self,
-        auxiliary_shape: tuple[int, ...],
+        auxiliary_shape: tuple[int, ...] | None,
         num_pos: int = 3,
         *,
         key: KeyArray,
@@ -256,7 +256,11 @@ class QuatUpdate(eqx.Module):
 
         seq_len = 16
         num_out = 4
-        num_aux = 3
+        # num_aux = 3
+        if auxiliary_shape is not None:
+            num_aux = auxiliary_shape[-1]
+        else:
+            num_aux = None
         num_heads = 8
         num_channels = 32
         num_blocks = 2
@@ -432,7 +436,11 @@ class PosUpdate(eqx.Module):
 
         self.num_bins = 64
 
-        num_aux = 3
+        # num_aux = 3
+        if auxiliary_shape is None:
+            num_aux = None
+        else:
+            num_aux = auxiliary_shape[-1]
         num_out = 3 * (3 * self.num_bins + 1)
         num_heads = 8
         num_channels = 32
@@ -523,7 +531,7 @@ class EuclideanToRigidTransform(equinox.Module):
 
 def _coupling(
     key: KeyArray,
-    auxiliary_shape: tuple[int, ...],
+    auxiliary_shape: tuple[int, ...] | None,
     specs: CouplingSpecification,
 ) -> Transform[RigidWithAuxiliary, RigidWithAuxiliary]:
     """Creates a coupling block consisting of:
@@ -542,13 +550,14 @@ def _coupling(
     chain = key_chain(key)
     blocks = []
     for _ in range(specs.num_repetitions):
-        aux_block = [
-            AuxUpdate(
-                auxiliary_shape=auxiliary_shape,
-                **asdict(specs.auxiliary_update),
-                key=next(chain),
-            )
-        ]
+        if auxiliary_shape is not None:
+            aux_block = [
+                AuxUpdate(
+                    auxiliary_shape=auxiliary_shape,
+                    **asdict(specs.auxiliary_update),
+                    key=next(chain),
+                )
+            ]
         pos_block = [
             PosUpdate(
                 auxiliary_shape=auxiliary_shape,
@@ -559,34 +568,47 @@ def _coupling(
 
         if specs.act_norm:
             pos_block += [ActNorm(lenses.lens.pos)]
-            aux_block += [ActNorm(lenses.lens.aux)]
+            if auxiliary_shape is not None:
+                aux_block += [ActNorm(lenses.lens.aux)]
 
-        sub_block = Pipe(
-            [
-                *aux_block,
-                *pos_block,
-                QuatUpdate(
-                    auxiliary_shape=auxiliary_shape,
-                    **asdict(specs.quaternion_update),
-                    key=next(chain),
-                ),
-            ]
-        )
+        if auxiliary_shape is not None:
+            sub_block = Pipe(
+                [
+                    *aux_block,
+                    *pos_block,
+                    QuatUpdate(
+                        auxiliary_shape=auxiliary_shape,
+                        **asdict(specs.quaternion_update),
+                        key=next(chain),
+                    ),
+                ]
+            )
+        else:
+            sub_block = Pipe(
+                [
+                    *pos_block,
+                    QuatUpdate(
+                        auxiliary_shape=auxiliary_shape,
+                        **asdict(specs.quaternion_update),
+                        key=next(chain),
+                    ),
+                ]
+            )
         blocks.append(sub_block)
     return Pipe(blocks)
 
 
 def build_flow(
     key: KeyArray,
-    auxiliary_shape: tuple[int, ...],
+    auxiliary_shape: tuple[int, ...] | None,
     specs: FlowSpecification,
-    base: OpenMMDensity,
-    target: OpenMMDensity,
+    # base: OpenMMDensity,
+    # target: OpenMMDensity,
 ) -> Pipe[DataWithAuxiliary, DataWithAuxiliary]:
     """Creates the final flow composed of:
 
      - a preprocessing transformation
-     - multiple coupling blokcks
+     - multiple coupling blocks
 
     Args:
         key (KeyArray): PRNG key
@@ -602,7 +624,7 @@ def build_flow(
         blocks.append(_coupling(next(chain), auxiliary_shape, coupling))
 
     couplings = LayerStackedPipe(blocks, use_scan=True)
-    couplines = Pipe(blocks)
+    # couplines = Pipe(blocks)
     return Pipe(
         [
             EuclideanToRigidTransform(),

@@ -126,7 +126,7 @@ class SystemSpecification:
 
 @pytree_dataclass(frozen=True)
 class ModelSpecification:
-    auxiliary_shape: tuple[int, ...]
+    auxiliary_shape: tuple[int, ...] | None
     flow: FlowSpecification
     base: SystemSpecification
     target: SystemSpecification

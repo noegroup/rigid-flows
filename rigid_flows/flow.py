@@ -277,7 +277,7 @@ class QuatUpdate(eqx.Module):
 
         reflection, gate = jnp.split(out, 2, axis=-1)
 
-        reflection = reflection * jax.nn.sigmoid(gate - 5.0)
+        reflection = reflection * jax.nn.sigmoid(gate - 3.0)
 
         reflection = reflection.reshape(input.rigid.rot.shape)
         reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)(
@@ -372,7 +372,7 @@ class AuxUpdate(eqx.Module):
             input.aux.shape[0], -1
         )
         out, gate = jnp.split(out, 2, axis=-1)
-        out = out * jax.nn.sigmoid(gate - 5.0)
+        out = out * jax.nn.sigmoid(gate - 3.0)
 
         shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
         return shift, scale
@@ -436,7 +436,7 @@ class PosUpdate(eqx.Module):
         params = self.net(input.aux, input.rigid.rot)
         params = params.reshape(*input.rigid.pos.shape, -1)
         params, gate = jnp.split(params, 2, axis=-1)
-        params = params * jax.nn.sigmoid(gate - 5.0)
+        params = params * jax.nn.sigmoid(gate - 3.0)
         reflection = params.reshape(*input.rigid.pos.shape, 2)
         reflection = jax.vmap(
             jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)

@@ -84,6 +84,11 @@ class OpenMMEnergyModel:
         type: 'linear' or 'square'
         slope: used only when type='square'
         """
+
+        if "customLJ" not in self.model.water_type and cutoff is None:
+            # already using a water model without cutoff, nothing to be done
+            return
+
         my_lennard_jones = partial(
             lennard_jones,
             sigma=self.model.sigma_O,
@@ -111,7 +116,7 @@ class OpenMMEnergyModel:
                     )
                 case _:
                     raise ValueError(f"unkown cutoff type: '{type}'")
-            self.model.set_customLJ(expr, self.context)
+        self.model.set_customLJ(expr, self.context) #will complain if trying to set a cutoff to a non "customLJ" water
 
     def set_box(self, box: SimulationBox):
         box_vectors = np.diag(np.array(box.size))

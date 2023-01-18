@@ -64,25 +64,28 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
         results = {}
 
-        pos = inp.pos * self.box.size
+        sz = jnp.tile(self.box.size[None, None], (inp.pos.shape[-3], 4, 1))
+        if has_batch_dim:
+            sz = sz[None]
+
+        pos = inp.pos * sz
 
         if omm:
             if self.sys_specs.fixed_box:
                 box = None
             else:
-                box = inp.box.size
+                raise NotImplementedError()
 
             energy = partial(
                 wrap_openmm_model(self.omm_model)[0],
-                box=box,
+                box=None,
                 has_batch_dim=has_batch_dim,
             )
-            results["omm"] = energy(pos) + jnp.log(self.box.size).sum()
+            results["omm"] = energy(pos) + jnp.log(sz).sum()
         if aux:
-            aux_prob = self.aux_model.log_prob(inp.aux)
-            for _ in range(len(self.aux_model.batch_shape)):
-                aux_prob = aux_prob.sum(-1)
-            results["aux"] = -aux_prob
+            results["aux"] = -self.aux_model.log_prob(inp.aux).sum(
+                axis=(-2, -1)
+            )
 
         return results
 
@@ -128,7 +131,9 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             box = SimulationBox(self.data.box[idx])
             pos = self.data.pos[idx].reshape(-1, 4, 3)
             pos = boxify(pos, self.box)
-            pos = pos / self.box.size
+
+            sz = jnp.tile(self.box.size[None, None], (pos.shape[0], 4, 1))
+            pos = pos / sz
 
             aux = self.aux_model.sample(seed=next(chain))
 
@@ -142,7 +147,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             sample = DataWithAuxiliary(pos, aux, sign, box, force)
             energy = self.potential(sample)
 
-            energy -= jnp.log(self.box.size).sum()
+            energy -= jnp.log(sz).sum()
             return Transformed(sample, energy)
 
     @staticmethod

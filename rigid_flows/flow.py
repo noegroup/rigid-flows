@@ -297,11 +297,18 @@ class QuatUpdate(eqx.Module):
     ) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
         reflection = self.params(input)
-        new, ldj = unpack(
-            VectorizedTransform(DoubleMoebius(reflection)).forward(
-                input.rigid.rot
+        # new, ldj = unpack(
+        #     VectorizedTransform(DoubleMoebius(reflection)).forward(
+        #         input.rigid.rot
+        #     )
+        # )
+        reflection = jax.vmap(geom.unit)(reflection)
+        new = jax.vmap(
+            lambda reflection, rot: geom.qprod(
+                reflection, geom.qprod(rot, geom.qconj(reflection))
             )
-        )
+        )(reflection, input.rigid.rot)
+        ldj = jnp.zeros(())
         return Transformed(lenses.bind(input).rigid.rot.set(new), ldj)
 
     def inverse(
@@ -309,11 +316,19 @@ class QuatUpdate(eqx.Module):
     ) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
         reflection = self.params(input)
-        new, ldj = unpack(
-            VectorizedTransform(DoubleMoebius(reflection)).inverse(
-                input.rigid.rot
+        # new, ldj = unpack(
+        #     VectorizedTransform(DoubleMoebius(reflection)).inverse(
+        #         input.rigid.rot
+        #     )
+        # )
+        reflection = jax.vmap(geom.unit)(reflection)
+        reflection = jax.vmap(geom.qconj)(reflection)
+        new = jax.vmap(
+            lambda reflection, rot: geom.qprod(
+                reflection, geom.qprod(rot, geom.qconj(reflection))
             )
-        )
+        )(reflection, input.rigid.rot)
+        ldj = jnp.zeros(())
         return Transformed(lenses.bind(input).rigid.rot.set(new), ldj)
 
 
@@ -587,6 +602,7 @@ def build_flow(
         blocks.append(_coupling(next(chain), auxiliary_shape, coupling))
 
     couplings = LayerStackedPipe(blocks, use_scan=True)
+    couplines = Pipe(blocks)
     return Pipe(
         [
             EuclideanToRigidTransform(),

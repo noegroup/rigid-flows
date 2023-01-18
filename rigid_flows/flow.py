@@ -606,7 +606,7 @@ def build_flow(
         blocks.append(_coupling(next(chain), auxiliary_shape, coupling))
 
     couplings = LayerStackedPipe(blocks, use_scan=True)
-    couplines = Pipe(blocks)
+    # couplines = Pipe(blocks)
     return Inverted(
         Pipe(
             [

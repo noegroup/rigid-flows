@@ -278,7 +278,6 @@ class SamplingStatistics:
 
     omm_energies: np.ndarray
     aux_energies: np.ndarray
-    com_energies: np.ndarray
     model_energies: np.ndarray
 
     ess: float
@@ -330,8 +329,7 @@ def sample_from_target(
     key: KeyArray,
     target: OpenMMDensity,
 ) -> Transformed[DataWithAuxiliary]:
-    out = target.sample(key)
-    return out
+    return target.sample(key)
 
 
 def sample_from_base(
@@ -355,25 +353,11 @@ def compute_sample_energies(
 ):
 
     energies = target.compute_energies(
-        samples.obj, omm=True, aux=True, com=True, has_batch_dim=True
+        samples.obj, omm=True, aux=True, has_batch_dim=True
     )
-
     aux_energies = energies["aux"]
-    # aux_energies = -target.aux_model.log_prob(samples.obj.aux)
-    # aux_energies = aux_energies.reshape(aux_energies.shape[0], -1).sum(axis=-1)
-
-    # sample_positions = np.array(samples.obj.pos).reshape(
-    #     samples.obj.pos.shape[0], -1, 3
-    # )
-    # box = np.diag(samples.obj.box.size[0])
-    # omm_energies, _ = target.omm_model.compute_energies_and_forces(
-    #     sample_positions, box
-    # )
     omm_energies = energies["omm"]
-    com_energies = energies["com"]
-    # target_energies = omm_energies + aux_energies
-
-    return omm_energies, aux_energies, com_energies
+    return omm_energies, aux_energies
 
 
 def compute_sampling_statistics(
@@ -381,14 +365,11 @@ def compute_sampling_statistics(
     target: OpenMMDensity,
 ) -> SamplingStatistics:
 
-    omm_energies, aux_energies, com_energies = compute_sample_energies(
-        samples, target
-    )
+    omm_energies, aux_energies = compute_sample_energies(samples, target)
 
     model_energies = np.array(samples.ldj)
 
-    target_energies = omm_energies + aux_energies + com_energies
-    # weights = compute_stable_weights(model_energies - target_energies)
+    target_energies = omm_energies + aux_energies
     weights = jax.nn.softmax(model_energies - target_energies)
 
     ess = np.square(np.sum(weights)) / np.sum(np.square(weights))
@@ -398,7 +379,6 @@ def compute_sampling_statistics(
         omm_energies=np.array(omm_energies),
         aux_energies=np.array(aux_energies),
         model_energies=np.array(model_energies),
-        com_energies=np.array(com_energies),
         ess=float(ess),
         num=len(omm_energies),
     )
@@ -522,13 +502,13 @@ def report_model(
     if specs.plot_quaternions is not None:
         data_quats = jax.vmap(EuclideanToRigidTransform().forward)(
             data_samples.obj
-        ).obj.rot
+        ).obj.rigid.rot
         model_quats = jax.vmap(EuclideanToRigidTransform().forward)(
             model_samples.obj
-        ).obj.rot
+        ).obj.rigid.rot
         prior_quats = jax.vmap(EuclideanToRigidTransform().forward)(
             prior_samples.obj
-        ).obj.rot
+        ).obj.rigid.rot
         logging.info(f"plotting quaternions")
         fig = plot_quaternions(
             data_quats, model_quats, prior_quats, specs.plot_quaternions
@@ -587,7 +567,7 @@ def report_model(
     # plot energy histograms
     if specs.plot_energy_histograms:
         logging.info(f"plotting energy histogram")
-        omm_energies, aux_energies, com_energies = compute_sample_energies(
+        omm_energies, aux_energies = compute_sample_energies(
             data_samples, target
         )
 

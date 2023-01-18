@@ -1,6 +1,5 @@
-from dataclasses import asdict, astuple
+from dataclasses import asdict
 from functools import partial
-from multiprocessing.sharedctypes import Value
 from typing import Any, cast
 
 import distrax
@@ -14,9 +13,7 @@ from jax_dataclasses import pytree_dataclass
 from jaxtyping import Float
 
 from flox import geom
-from flox._src.flow import rigid
 from flox._src.flow.impl import Affine, DistraxWrapper
-from flox._src.geom.euclidean import inner, unit
 from flox.flow import (
     DoubleMoebius,
     Pipe,
@@ -28,8 +25,8 @@ from flox.util import key_chain, unpack
 
 from .data import DataWithAuxiliary
 from .density import OpenMMDensity
-from .nn import MLPMixer, QuatEncoder
 from .nnextra import AuxConditioner, PosConditioner, RotConditioner
+from .rigid import Rigid
 from .specs import CouplingSpecification, FlowSpecification
 from .system import SimulationBox
 
@@ -41,65 +38,17 @@ Vector3 = Float[Array, "... 3"]
 Quaternion = Float[Array, "... 4"]
 Auxiliary = Float[Array, f"... AUX"]
 
-AtomRepresentation = Float[Array, "... MOL 4 3"]
+Atoms = Float[Array, "... MOL 4 3"]
 
 
-@pytree_dataclass(frozen=True)
-class InternalCoordinates:
-    # see https://github.com/openmm/openmm/blob/master/wrappers/python/openmm/app/data/tip4pew.xml
-    d_OH1: Scalar  # = jnp.array(0.09572)
-    d_OH2: Scalar  # = jnp.array(0.09572)
-    a_HOH: Scalar  # = jnp.array(1.8242182)
-    d_OM: Scalar  # = jnp.array(0.0125)
-    a_OM: Scalar  # = jnp.array(0.9121091)
+class RigidTransform(Transform[Atoms, Rigid]):
+    def forward(self, inp: Atoms) -> Transformed[Rigid]:
+        rigid = Rigid.from_array(inp)
+        return Transformed(rigid, jnp.zeros(()))
 
-
-@pytree_dataclass(frozen=True)
-class RigidRepresentation:
-    rot: Quaternion
-    pos: Vector3
-    ics: InternalCoordinates  # = InternalCoordinates()
-
-
-def to_rigid(pos: AtomRepresentation) -> Transformed[RigidRepresentation]:
-    q, p, d_OH1, d_OH2, a_HOH = rigid.from_euclidean(pos[:3])
-    ldj = rigid.from_euclidean_log_jacobian(pos[:3])
-    d_OM = geom.norm(pos[3] - p)
-
-    r = pos - p[None]
-    a_OM = jnp.arccos(inner(unit(r[1]), unit(r[3])))
-
-    ldj -= jnp.log(4 * d_OM**4 + d_OM**2) / 2
-    return Transformed(
-        RigidRepresentation(
-            q, p, InternalCoordinates(d_OH1, d_OH2, a_HOH, d_OM, a_OM)
-        ),
-        ldj,
-    )
-
-
-def from_rigid(rp: RigidRepresentation) -> Transformed[AtomRepresentation]:
-    r_OM = rp.ics.d_OM * jnp.array(
-        [jnp.sin(rp.ics.a_OM), 0.0, jnp.cos(rp.ics.a_OM)]
-    )
-    r_OM = geom.qrot3d(rp.rot, r_OM)
-    pos = rigid.to_euclidean(rp.rot, rp.pos, *astuple(rp.ics)[:3])
-    ldj = rigid.to_euclidean_log_jacobian(rp.rot, rp.pos, *astuple(rp.ics)[:3])
-    ldj += jnp.log(4 * rp.ics.d_OM**4 + rp.ics.d_OM**2) / 2
-    pos = jnp.concatenate([pos, (pos[0] + r_OM)[None]], axis=0)
-    return Transformed(pos, ldj)
-
-
-class RigidTransform(Transform[AtomRepresentation, RigidRepresentation]):
-    def forward(
-        self, inp: AtomRepresentation
-    ) -> Transformed[RigidRepresentation]:
-        return to_rigid(inp)
-
-    def inverse(
-        self, inp: RigidRepresentation
-    ) -> Transformed[AtomRepresentation]:
-        return from_rigid(inp)
+    def inverse(self, inp: Rigid) -> Transformed[Atoms]:
+        atom_rep = inp.asarray()
+        return Transformed(atom_rep, jnp.zeros(()))
 
 
 from flox.flow import Inverted, Transform, Transformed, bind, pure
@@ -167,9 +116,7 @@ class RigidWithAuxiliary:
         box: simulation box
     """
 
-    rot: Array
-    pos: Array
-    ics: InternalCoordinates
+    rigid: Rigid
     aux: Array
     box: SimulationBox
 
@@ -332,13 +279,13 @@ class QuatUpdate(eqx.Module):
         Returns:
             Array: the parameter (reflection) of the double moebius transform
         """
-        out = self.net(input.pos, input.aux)
+        out = self.net(input.rigid.pos, input.aux)
 
         reflection, gate = jnp.split(out, 2, axis=-1)
 
-        reflection = reflection * jax.nn.sigmoid(gate - 4.0)
+        reflection = reflection * jax.nn.sigmoid(gate - 3.0)
 
-        reflection = reflection.reshape(input.rot.shape)
+        reflection = reflection.reshape(input.rigid.rot.shape)
         reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.99)(
             reflection
         )
@@ -351,9 +298,11 @@ class QuatUpdate(eqx.Module):
         """Forward transform"""
         reflection = self.params(input)
         new, ldj = unpack(
-            VectorizedTransform(DoubleMoebius(reflection)).forward(input.rot)
+            VectorizedTransform(DoubleMoebius(reflection)).forward(
+                input.rigid.rot
+            )
         )
-        return Transformed(lenses.bind(input).rot.set(new), ldj)
+        return Transformed(lenses.bind(input).rigid.rot.set(new), ldj)
 
     def inverse(
         self, input: RigidWithAuxiliary
@@ -361,9 +310,11 @@ class QuatUpdate(eqx.Module):
         """Inverse transform"""
         reflection = self.params(input)
         new, ldj = unpack(
-            VectorizedTransform(DoubleMoebius(reflection)).inverse(input.rot)
+            VectorizedTransform(DoubleMoebius(reflection)).inverse(
+                input.rigid.rot
+            )
         )
-        return Transformed(lenses.bind(input).rot.set(new), ldj)
+        return Transformed(lenses.bind(input).rigid.rot.set(new), ldj)
 
 
 class AuxUpdate(eqx.Module):
@@ -419,9 +370,11 @@ class AuxUpdate(eqx.Module):
         Returns:
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
-        out = self.net(input.pos, input.rot).reshape(input.aux.shape[0], -1)
+        out = self.net(input.rigid.pos, input.rigid.rot).reshape(
+            input.aux.shape[0], -1
+        )
         out, gate = jnp.split(out, 2, axis=-1)
-        out = out * jax.nn.sigmoid(gate - 4.0)
+        out = out * jax.nn.sigmoid(gate - 3.0)
 
         shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
         return shift, scale
@@ -445,9 +398,6 @@ class AuxUpdate(eqx.Module):
         return Transformed(lenses.bind(input).aux.set(aux), ldj)
 
 
-import distrax
-
-
 class PosUpdate(eqx.Module):
 
     net: PosConditioner
@@ -465,7 +415,7 @@ class PosUpdate(eqx.Module):
         chain = key_chain(key)
         seq_len = 16
 
-        self.num_bins = 8
+        self.num_bins = 64
 
         num_aux = 3
         num_out = 3 * (3 * self.num_bins + 1)
@@ -484,10 +434,10 @@ class PosUpdate(eqx.Module):
         )
 
     def params(self, input: RigidWithAuxiliary):
-        params = self.net(input.aux, input.rot)
-        params = params.reshape(*input.pos.shape, -1)
+        params = self.net(input.aux, input.rigid.rot)
+        params = params.reshape(*input.rigid.pos.shape, -1)
         params, gate = jnp.split(params, 2, axis=-1)
-        params = params * jax.nn.sigmoid(gate - 4.0)
+        params = params * jax.nn.sigmoid(gate - 3.0)
         return params
 
     def forward(
@@ -505,9 +455,9 @@ class PosUpdate(eqx.Module):
                     range_max,
                     boundary_slopes="circular",
                 )
-            ).forward(input.pos)
+            ).forward(input.rigid.pos)
         )
-        output = lenses.bind(input).pos.set(pos)
+        output = lenses.bind(input).rigid.pos.set(pos)
         return Transformed(output, ldj)
 
     def inverse(
@@ -525,9 +475,9 @@ class PosUpdate(eqx.Module):
                     range_max,
                     boundary_slopes="circular",
                 )
-            ).inverse(input.pos)
+            ).inverse(input.rigid.pos)
         )
-        output = lenses.bind(input).pos.set(pos)
+        output = lenses.bind(input).rigid.pos.set(pos)
         return Transformed(output, ldj)
 
 
@@ -535,25 +485,21 @@ class EuclideanToRigidTransform(equinox.Module):
     def forward(
         self, input: DataWithAuxiliary
     ) -> Transformed[RigidWithAuxiliary]:
-        rigid, ldj = unpack(
-            VectorizedTransform(RigidTransform()).forward(input.pos)
-        )
+        transform = RigidTransform()
+        rigid, _ = unpack(jax.vmap(transform.forward)(input.pos))
+        ldj = jnp.zeros(())
         return Transformed(
-            RigidWithAuxiliary(
-                rigid.rot, rigid.pos, rigid.ics, input.aux, input.box
-            ),
+            RigidWithAuxiliary(rigid, input.aux, input.box),
             ldj,
         )
 
     def inverse(
         self, input: RigidWithAuxiliary
     ) -> Transformed[DataWithAuxiliary]:
-
-        rigid = jax.vmap(RigidRepresentation)(input.rot, input.pos, input.ics)
-
-        pos, ldj = unpack(VectorizedTransform(RigidTransform()).inverse(rigid))
-
-        sign = jnp.sign(input.rot[:, (0,)])
+        transform = RigidTransform()
+        pos, _ = unpack(jax.vmap(transform.inverse)(input.rigid))
+        ldj = jnp.zeros(())
+        sign = jnp.sign(input.rigid.rot[:, (0,)])
         return Transformed(
             DataWithAuxiliary(pos, input.aux, sign, input.box, None),
             ldj,
@@ -640,8 +586,7 @@ def build_flow(
     for coupling in specs.couplings:
         blocks.append(_coupling(next(chain), auxiliary_shape, coupling))
 
-    # couplings = LayerStackedPipe(blocks, use_scan=True)
-    couplings = Pipe(blocks)
+    couplings = LayerStackedPipe(blocks, use_scan=True)
     return Pipe(
         [
             EuclideanToRigidTransform(),

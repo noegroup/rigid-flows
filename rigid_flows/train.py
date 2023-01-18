@@ -221,19 +221,15 @@ def train_fn(
     specs: TrainingSpecification,
 ):
     params = eqx.filter(flow, eqx.is_array)
-    optim = optax.adam(get_scheduler(specs), b1=0.999, b2=0.9999)
+    optim = optax.adam(get_scheduler(specs))
 
     opt_state = optim.init(params)  # type: ignore
-    opt_state = lenses.bind(opt_state)[0].nu.modify(
-        partial(jax.tree_map, lambda x: jnp.ones_like(x))
-    )
 
     def init_losses(
         key: KeyArray,
         flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
     ) -> TotLossFun:
         chain = key_chain(key)
-        # chain = key_chain(42)
         partial_loss_fns = []
         if specs.weight_fe > 0:
             partial_loss_fns.append(

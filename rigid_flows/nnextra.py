@@ -104,10 +104,13 @@ class PosConditioner(eqx.Module):
         ]
 
         self.decoder = jax.tree_map(
-            zero_param, eqx.nn.Sequential([
-                eqx.nn.LayerNorm((inp,), elementwise_affine=True),
-                eqx.nn.Linear(inp, out, use_bias=True, key=next(chain))
-            ])
+            zero_param,
+            eqx.nn.Sequential(
+                [
+                    eqx.nn.LayerNorm((inp,), elementwise_affine=True),
+                    eqx.nn.Linear(inp, out, use_bias=True, key=next(chain)),
+                ]
+            ),
         )
 
     def __call__(self, aux, rot):
@@ -207,10 +210,13 @@ class AuxConditioner(eqx.Module):
             for _ in range(num_blocks)
         ]
         self.decoder = jax.tree_map(
-            zero_param, eqx.nn.Sequential([
-                eqx.nn.LayerNorm((inp,), elementwise_affine=True),
-                eqx.nn.Linear(inp, out, use_bias=True, key=next(chain))
-            ])
+            zero_param,
+            eqx.nn.Sequential(
+                [
+                    eqx.nn.LayerNorm((inp,), elementwise_affine=True),
+                    eqx.nn.Linear(inp, out, use_bias=True, key=next(chain)),
+                ]
+            ),
         )
 
     def __call__(self, pos, rot):
@@ -317,10 +323,13 @@ class RotConditioner(eqx.Module):
             for _ in range(num_blocks)
         ]
         self.decoder = jax.tree_map(
-            zero_param, eqx.nn.Sequential([
-                eqx.nn.LayerNorm((inp,), elementwise_affine=True),
-                eqx.nn.Linear(inp, out, use_bias=True, key=next(chain))
-            ])
+            zero_param,
+            eqx.nn.Sequential(
+                [
+                    eqx.nn.LayerNorm((inp,), elementwise_affine=True),
+                    eqx.nn.Linear(inp, out, use_bias=True, key=next(chain)),
+                ]
+            ),
         )
 
     def __call__(self, pos, aux):

@@ -91,11 +91,11 @@ model:
 train:
 
   # first stage: only likelihood
-  - num_epochs: 3
+  - num_epochs: 100
     num_iters_per_epoch: 100
 
     init_learning_rate: 1e-3
-    target_learning_rate: 1e-5
+    target_learning_rate: 1e-4
 
     weight_nll: 0.
 

@@ -135,15 +135,20 @@ class OpenMMEnergyModel:
 
         pos = pos.reshape(pos.shape[0], -1, 3)
 
+        mask = np.ones_like(pos[0])
+        mask = mask.reshape(-1, 4, 3)
+        mask[:, -1, :] = 0
+        mask = mask.reshape(pos[0].shape)
+
         # iterate over batch dimension
         for i in range(len(pos)):
 
-            energy = jnp.empty_like(energies[i])
-            force = jnp.empty_like(forces[i])
+            energy = np.empty_like(energies[i])
+            force = np.empty_like(forces[i])
 
             try:
                 self.context.setPositions(pos[i])
-                # self.context.computeVirtualSites()
+                self.context.computeVirtualSites()
 
                 state = self.context.getState(getEnergy=True, getForces=True)
                 energy = (
@@ -168,7 +173,7 @@ class OpenMMEnergyModel:
                         pass
             finally:
                 energies[i] = energy
-                forces[i] = force
+                forces[i] = force * mask
 
         return energies, forces
 

@@ -59,7 +59,6 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         inp: DataWithAuxiliary,
         omm: bool,
         aux: bool,
-        com: bool,
         has_batch_dim: bool,
     ):
 
@@ -79,12 +78,6 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 has_batch_dim=has_batch_dim,
             )
             results["omm"] = energy(pos) + jnp.log(self.box.size).sum()
-        if com:
-            data_com = inp.pos.mean(axis=(-2, -3))
-            com_prob = self.com_model.log_prob(data_com)
-            for _ in range(len(self.com_model.batch_shape)):
-                com_prob = com_prob.sum(-1)
-            results["com"] = -com_prob * 0.0
         if aux:
             aux_prob = self.aux_model.log_prob(inp.aux)
             for _ in range(len(self.aux_model.batch_shape)):
@@ -105,7 +98,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         """
         return sum(
             self.compute_energies(
-                inp, omm=True, aux=True, com=True, has_batch_dim=False
+                inp, omm=True, aux=True, has_batch_dim=False
             ).values(),
             jnp.zeros(()),
         )
@@ -134,13 +127,10 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             )
             box = SimulationBox(self.data.box[idx])
             pos = self.data.pos[idx].reshape(-1, 4, 3)
-            # pos = (pos / self.box.size) % 1
             pos = boxify(pos, self.box)
             pos = pos / self.box.size
 
             aux = self.aux_model.sample(seed=next(chain))
-            # com = self.com_model.sample(seed=next(chain))
-            # pos = pos - pos.mean(axis=(0, 1), keepdims=True) + com[None, None]
 
             force = None
             sign = jnp.sign(

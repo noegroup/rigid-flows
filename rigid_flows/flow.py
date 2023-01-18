@@ -463,7 +463,7 @@ class PosUpdate(eqx.Module):
                     range_max,
                     boundary_slopes="circular",
                 )
-            ).forward(input.rigid.pos)
+            ).forward(pos)
         )
         pos = pos * input.box.size
         output = lenses.bind(input).rigid.pos.set(pos)

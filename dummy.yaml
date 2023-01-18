@@ -29,7 +29,7 @@ model:
   flow:
     # coupling layers
     couplings:
-      - num_repetitions: 2
+      - num_repetitions: 1
         auxiliary_update:
           seq_len: 16
           activation: gelu

@@ -14,13 +14,7 @@ from jaxtyping import Float
 
 from flox import geom
 from flox._src.flow.impl import Affine, DistraxWrapper
-from flox.flow import (
-    DoubleMoebius,
-    Pipe,
-    Transform,
-    Transformed,
-    VectorizedTransform,
-)
+from flox.flow import DoubleMoebius, Pipe, Transform, Transformed
 from flox.util import key_chain, unpack
 
 from .data import DataWithAuxiliary
@@ -279,7 +273,7 @@ class QuatUpdate(eqx.Module):
         Returns:
             Array: the parameter (reflection) of the double moebius transform
         """
-        out = self.net(0.0 * input.rigid.pos, input.aux)
+        out = self.net(input.rigid.pos, input.aux)
 
         reflection, gate = jnp.split(out, 2, axis=-1)
 
@@ -297,39 +291,28 @@ class QuatUpdate(eqx.Module):
     ) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
         reflection = self.params(input)
-        new, ldj = unpack(
-            VectorizedTransform(DoubleMoebius(reflection)).forward(
-                input.rigid.rot
-            )
-        )
-        # reflection = jax.vmap(geom.unit)(reflection)
-        # new = jax.vmap(
-        #     lambda reflection, rot: geom.qprod(
-        #         reflection, geom.qprod(rot, geom.qconj(reflection))
-        #     )
-        # )(reflection, input.rigid.rot)
-        # ldj = jnp.zeros(())
-        return Transformed(lenses.bind(input).rigid.rot.set(new), ldj)
+
+        def trafo(ref, rot):
+            return DoubleMoebius(ref).forward(rot)
+
+        rot, ldj = unpack(jax.vmap(trafo)(reflection, input.rigid.rot))
+        output = lenses.bind(input).rigid.rot.set(rot)
+        ldj = jnp.sum(ldj)
+        return Transformed(output, ldj)
 
     def inverse(
         self, input: RigidWithAuxiliary
     ) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
         reflection = self.params(input)
-        new, ldj = unpack(
-            VectorizedTransform(DoubleMoebius(reflection)).inverse(
-                input.rigid.rot
-            )
-        )
-        # reflection = jax.vmap(geom.unit)(reflection)
-        # reflection = jax.vmap(geom.qconj)(reflection)
-        # new = jax.vmap(
-        #     lambda reflection, rot: geom.qprod(
-        #         reflection, geom.qprod(rot, geom.qconj(reflection))
-        #     )
-        # )(reflection, input.rigid.rot)
-        # ldj = jnp.zeros(())
-        return Transformed(lenses.bind(input).rigid.rot.set(new), ldj)
+
+        def trafo(ref, rot) -> Transformed[Array]:
+            return DoubleMoebius(ref).inverse(rot)
+
+        rot, ldj = unpack(jax.vmap(trafo)(reflection, input.rigid.rot))
+        output = lenses.bind(input).rigid.rot.set(rot)
+        ldj = jnp.sum(ldj)
+        return Transformed(output, ldj)
 
 
 class AuxUpdate(eqx.Module):
@@ -449,10 +432,10 @@ class PosUpdate(eqx.Module):
         )
 
     def params(self, input: RigidWithAuxiliary):
-        params = self.net(input.aux, 0.0 * input.rigid.rot)
+        params = self.net(input.aux, input.rigid.rot)
         params = params.reshape(*input.rigid.pos.shape, -1)
         params, gate = jnp.split(params, 2, axis=-1)
-        params = params * jax.nn.sigmoid(gate - 3.0)
+        params = params * jax.nn.sigmoid(gate - 6.0)
         return params
 
     def forward(
@@ -462,6 +445,8 @@ class PosUpdate(eqx.Module):
         range_min = 0.0
         range_max = 1.0
         params = self.params(input)
+        pos = input.rigid.pos
+        pos = pos / input.box.size
         pos, ldj = unpack(
             DistraxWrapper(
                 distrax.RationalQuadraticSpline(
@@ -472,6 +457,7 @@ class PosUpdate(eqx.Module):
                 )
             ).forward(input.rigid.pos)
         )
+        pos = pos * input.box.size
         output = lenses.bind(input).rigid.pos.set(pos)
         return Transformed(output, ldj)
 
@@ -482,6 +468,8 @@ class PosUpdate(eqx.Module):
         range_min = 0.0
         range_max = 1.0
         params = self.params(input)
+        pos = input.rigid.pos
+        pos = pos / input.box.size
         pos, ldj = unpack(
             DistraxWrapper(
                 distrax.RationalQuadraticSpline(
@@ -490,8 +478,9 @@ class PosUpdate(eqx.Module):
                     range_max,
                     boundary_slopes="circular",
                 )
-            ).inverse(input.rigid.pos)
+            ).inverse(pos)
         )
+        pos = pos * input.box.size
         output = lenses.bind(input).rigid.pos.set(pos)
         return Transformed(output, ldj)
 

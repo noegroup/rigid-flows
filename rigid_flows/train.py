@@ -15,7 +15,7 @@ from jax_dataclasses import pytree_dataclass
 from optax import GradientTransformation, OptState
 from tqdm import tqdm
 
-from flox._src.flow.potential import Potential
+from flox._src.flow.potential import Potential, PushforwardPotential
 from flox._src.flow.sampling import PushforwardSampler, Sampler
 from flox.flow import PullbackSampler, Transform
 from flox.util import key_chain
@@ -96,23 +96,21 @@ def force_matching_loss_fn(
     def evaluate(
         flow: Transform[DataWithAuxiliary, DataWithAuxiliary]
     ) -> Array:
-        raise NotImplementedError()
-        # flow_grads = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(
-        #     samples
-        # )
-        # mse = 0
-        # mse += jnp.mean(
-        #     jnp.square(
-        #         -(
-        #             flow_grads.pos.reshape(num_samples, -1)
-        #             - omm_forces.reshape(num_samples, -1)
-        #         )
-        #         * mask
-        #     )
-        # )
-        # mse += jnp.mean(jnp.square(flow_grads.aux - samples.aux))
-        # mse += jnp.mean(jnp.square(flow_grads.com - samples.com))
-        # return mse
+        flow_grads = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(
+            samples
+        )
+        mse = 0
+        mse += jnp.mean(
+            jnp.square(
+                -(
+                    flow_grads.pos.reshape(num_samples, -1)
+                    - omm_forces.reshape(num_samples, -1)
+                )
+                * mask
+            )
+        )
+        mse += jnp.mean(jnp.square(flow_grads.aux - samples.aux))
+        return mse
 
     return evaluate
 
@@ -154,10 +152,9 @@ def var_grad_loss_fn(
     def evaluate(
         flow: Transform[DataWithAuxiliary, DataWithAuxiliary]
     ) -> Array:
-        raise NotImplementedError()
-        # flow_energies = jax.vmap(PushforwardPotential(base, flow))(samples)
-        # target_energies = jax.vmap(target)(samples)
-        # return jnp.var(flow_energies - target_energies)
+        flow_energies = jax.vmap(PushforwardPotential(base, flow))(samples)
+        target_energies = jax.vmap(target)(samples)
+        return jnp.var(flow_energies - target_energies)
 
     return evaluate
 

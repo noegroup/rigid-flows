@@ -13,7 +13,7 @@ from jax_dataclasses import pytree_dataclass
 from jaxtyping import Float
 
 from flox import geom
-from flox._src.flow.impl import Affine, DistraxWrapper
+from flox._src.flow.impl import Affine, DistraxWrapper, Moebius
 from flox.flow import DoubleMoebius, Pipe, Transform, Transformed
 from flox.util import key_chain, unpack
 
@@ -284,7 +284,7 @@ class QuatUpdate(eqx.Module):
         reflection = reflection * jax.nn.sigmoid(gate - 3.0)
 
         reflection = reflection.reshape(input.rigid.rot.shape)
-        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.99)(
+        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)(
             reflection
         )
 
@@ -424,7 +424,8 @@ class PosUpdate(eqx.Module):
             num_aux = None
         else:
             num_aux = auxiliary_shape[-1]
-        num_out = 3 * (3 * self.num_bins + 1)
+        # num_out = 3 * (3 * self.num_bins + 1)
+        num_out = 3 * 2
         num_heads = 8
         num_channels = 32
         num_blocks = 2
@@ -443,29 +444,38 @@ class PosUpdate(eqx.Module):
         params = self.net(input.aux, input.rigid.rot)
         params = params.reshape(*input.rigid.pos.shape, -1)
         params, gate = jnp.split(params, 2, axis=-1)
-        params = params * jax.nn.sigmoid(gate - 6.0)
-        return params
+        params = params * jax.nn.sigmoid(gate - 3.0)
+        reflection = params.reshape(*input.rigid.pos.shape, 2)
+        reflection = jax.vmap(
+            jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)
+        )(reflection)
+        return reflection
 
     def forward(
         self,
         input: RigidWithAuxiliary,
     ):
-        range_min = 0.0
-        range_max = 1.0
         params = self.params(input)
-        pos = input.rigid.pos
-        pos = pos / input.box.size
-        pos, ldj = unpack(
-            DistraxWrapper(
-                distrax.RationalQuadraticSpline(
-                    params,
-                    range_min,
-                    range_max,
-                    boundary_slopes="circular",
-                )
-            ).forward(pos)
+
+        rad = input.rigid.pos / input.box.size
+        pos = jnp.stack(
+            [
+                jnp.cos(2 * jnp.pi * rad - jnp.pi),
+                jnp.sin(2 * jnp.pi * rad - jnp.pi),
+            ],
+            axis=-1,
         )
+        pos, ldj = unpack(
+            jax.vmap(jax.vmap(lambda ref, pos: Moebius(ref).forward(pos)))(
+                params, pos
+            )
+        )
+        pos = jnp.arctan2(pos[..., 1], pos[..., 0])
+        pos = (pos + jnp.pi) / (2 * jnp.pi)
         pos = pos * input.box.size
+
+        ldj = jnp.sum(ldj)
+
         output = lenses.bind(input).rigid.pos.set(pos)
         return Transformed(output, ldj)
 
@@ -473,22 +483,27 @@ class PosUpdate(eqx.Module):
         self,
         input: RigidWithAuxiliary,
     ):
-        range_min = 0.0
-        range_max = 1.0
         params = self.params(input)
-        pos = input.rigid.pos
-        pos = pos / input.box.size
-        pos, ldj = unpack(
-            DistraxWrapper(
-                distrax.RationalQuadraticSpline(
-                    params,
-                    range_min,
-                    range_max,
-                    boundary_slopes="circular",
-                )
-            ).inverse(pos)
+
+        rad = input.rigid.pos / input.box.size
+        pos = jnp.stack(
+            [
+                jnp.cos(2 * jnp.pi * rad - jnp.pi),
+                jnp.sin(2 * jnp.pi * rad - jnp.pi),
+            ],
+            axis=-1,
         )
+        pos, ldj = unpack(
+            jax.vmap(jax.vmap(lambda ref, pos: Moebius(ref).inverse(pos)))(
+                params, pos
+            )
+        )
+        pos = jnp.arctan2(pos[..., 1], pos[..., 0])
+        pos = (pos + jnp.pi) / (2 * jnp.pi)
         pos = pos * input.box.size
+
+        ldj = jnp.sum(ldj)
+
         output = lenses.bind(input).rigid.pos.set(pos)
         return Transformed(output, ldj)
 

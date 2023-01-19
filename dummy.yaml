@@ -97,11 +97,11 @@ train:
     init_learning_rate: 1e-3
     target_learning_rate: 1e-4
 
-    weight_nll: 0.
+    weight_nll: 1.
 
     weight_fm_model: 0.
     fm_model_perturbation_noise: 0
-    weight_fm_target: 1.
+    weight_fm_target: 1e-5
     fm_target_perturbation_noise: 0
     fm_ignore_charge_site: true
 

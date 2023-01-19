@@ -607,6 +607,13 @@ def build_flow(
 
     couplings = LayerStackedPipe(blocks, use_scan=True)
     # couplines = Pipe(blocks)
+    return Pipe(
+        [
+            EuclideanToRigidTransform(),
+            couplings,
+            Inverted(EuclideanToRigidTransform()),
+        ]
+    )
     return Inverted(
         Pipe(
             [

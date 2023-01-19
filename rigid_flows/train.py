@@ -1,7 +1,4 @@
-from functools import partial
 from itertools import accumulate
-from math import prod
-from termios import FF1
 from typing import Callable, Iterable, cast
 
 import equinox as eqx
@@ -25,7 +22,6 @@ from .density import DensityModel, OpenMMDensity
 from .flow import EuclideanToRigidTransform
 from .reporting import Reporter
 from .specs import SystemSpecification, TrainingSpecification
-from .system import OpenMMEnergyModel, wrap_openmm_model
 from .utils import jit_and_cleanup_cache
 
 KeyArray = Array | jax.random.PRNGKeyArray
@@ -73,25 +69,33 @@ def mask_gradient(mask_value, original):
 
 
 def approximate_force_matching_loss(
-    u, x, pred, target, eps=1e-3, clip_norm=None
+    u, x, pred, target, eps=1e-3, clip_norm=1.0
 ):
+
     v = jax.tree_map(lambda p, t: p - t, pred, target)
-    if clip_norm is not None:
-        vnorm = jnp.sqrt(jnp.sum(jnp.square(v)))
-        vnorm_new = jnp.clip(vnorm, None, clip_norm)
-        v = v / vnorm * vnorm_new
-
-    x_pos = jax.tree_map(lambda x, v: x + eps * v, x, v)
-    x_neg = jax.tree_map(lambda x, v: x - eps * v, x, v)
-
-    xs = jax.tree_map(lambda a, b: jnp.stack([a, b]), x_pos, x_neg)
-    us = jax.vmap(u)(xs)
-
-    loss = (us[0] - us[1]) / (2 * eps)
 
     mask_val = jax.tree_util.tree_reduce(
         lambda c, v: c + 0.5 * jnp.sum(jnp.square(v)), v, jnp.zeros(())
     )
+
+    if clip_norm is not None:
+        vnorm = jax.tree_map(
+            lambda v: jnp.sqrt(1e-12 + jnp.sum(jnp.square(v))), v
+        )
+        vnorm_new = jax.tree_map(
+            lambda vnorm: jnp.clip(vnorm, None, clip_norm), vnorm
+        )
+        v = jax.tree_map(
+            lambda v, vnorm, vnorm_new: v / vnorm * vnorm_new,
+            v,
+            vnorm,
+            vnorm_new,
+        )
+
+    xs = jax.tree_map(lambda x, v: jnp.stack([x + eps * v, x - eps * v]), x, v)
+    us = jax.vmap(u)(xs)
+
+    loss = (us[0] - us[1]) / (2 * eps)
 
     return mask_gradient(mask_val, loss)
 
@@ -114,7 +118,10 @@ def force_matching_loss_fn(
             + perturbation_noise
             * jax.random.normal(next(chain), samples.pos.shape)
         )
-    pred = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(samples)
+    out, vjp = eqx.filter_vjp(
+        jax.vmap(PushforwardPotential(base, flow)), samples
+    )
+    pred = vjp(jnp.ones_like(out))[0]
     target = jax.vmap(jax.grad(omm_density.potential))(samples)
 
     def evaluate(

@@ -144,6 +144,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
     def from_specs(
         auxiliary_shape: tuple[int, ...] | None,
         sys_specs: SystemSpecification,
+        selection: slice = np.s_[:],
     ):
 
         omm_model = OpenMMEnergyModel.from_specs(sys_specs)
@@ -155,7 +156,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
         box = SimulationBox(jnp.diag(omm_model.model.box))
 
-        data = Data.from_specs(sys_specs, box)
+        data = Data.from_specs(sys_specs, box, selection)
         if sys_specs.recompute_forces:
             data = data.recompute_forces(omm_model)
         elif sys_specs.forces_path:

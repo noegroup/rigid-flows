@@ -3,11 +3,10 @@ import logging
 import jax
 import lenses
 import numpy as np
+from flox import geom
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
-
-from flox import geom
 
 from .system import (
     ErrorHandling,
@@ -42,15 +41,21 @@ class Data:
     def from_specs(
         specs: SystemSpecification,
         box: SimulationBox,
+        selection: slice = np.s_[:],
     ):
         path = f"{specs.path}/MDtraj-{specs}.npz"
         logging.info(f"Loading data from {path}")
         raw = np.load(path)
         data = Data(*map(jnp.array, raw.values()))
         data = lenses.bind(data).pos.set(
-            data.pos.reshape(data.pos.shape[0], -1, 4, 3)
+            data.pos[selection].reshape(data.pos[selection].shape[0], -1, 4, 3)
         )
         data = lenses.bind(data).pos.set(unwrap(data.pos, box))
+        data = lenses.bind(data).energy.set(data.energy[selection])
+        if data.force is not None:
+            data = lenses.bind(data).force.set(data.force[selection])
+        if data.box.shape[0] > 1:
+            data = lenses.bind(data).box.set(data.box[selection])
         if data.box.shape[1:] == (3, 3):
             data = Data(
                 data.pos, jax.vmap(jnp.diag)(data.box), data.energy, data.force
@@ -104,13 +109,20 @@ class PreprocessedData:
         modes = jnp.mean(oxy, axis=0)
         stds = jnp.std(oxy, axis=0)
 
-        # # unwrap positions
+        pos = data.pos
+        # unwrap positions
         # pos = modes[:, None] + geom.Torus(box.size).tangent(
         #     data.pos, data.pos - modes[:, None]
         # )
+        ## remove com position. is this useful?
+        pos = (
+            pos
+            - pos.mean(axis=(1, 2), keepdims=True)
+            + pos.mean(axis=(0, 1, 2), keepdims=True)
+        )
 
         return PreprocessedData(
-            data.pos, data.box, data.energy, data.force, modes, stds
+            pos, data.box, data.energy, data.force, modes, stds
         )
 
     def estimate_com_stats(self):

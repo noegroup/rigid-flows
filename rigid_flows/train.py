@@ -64,14 +64,46 @@ TotLossFun = Callable[
 ]
 
 
+def mask_gradient(mask_value, original):
+    return (
+        jax.lax.stop_gradient(mask_value)
+        + original
+        - jax.lax.stop_gradient(original)
+    )
+
+
+def approximate_force_matching_loss(
+    u, x, pred, target, eps=1e-3, clip_norm=None
+):
+    v = jax.tree_map(lambda p, t: p - t, pred, target)
+    if clip_norm is not None:
+        vnorm = jnp.sqrt(jnp.sum(jnp.square(v)))
+        vnorm_new = jnp.clip(vnorm, None, clip_norm)
+        v = v / vnorm * vnorm_new
+
+    x_pos = jax.tree_map(lambda x, v: x + eps * v, x, v)
+    x_neg = jax.tree_map(lambda x, v: x - eps * v, x, v)
+
+    xs = jax.tree_map(lambda a, b: jnp.stack([a, b]), x_pos, x_neg)
+    us = jax.vmap(u)(xs)
+
+    loss = (us[0] - us[1]) / (2 * eps)
+
+    mask_val = jax.tree_util.tree_reduce(
+        lambda c, v: c + 0.5 * jnp.sum(jnp.square(v)), v, jnp.zeros(())
+    )
+
+    return mask_gradient(mask_val, loss)
+
+
 def force_matching_loss_fn(
     key: KeyArray,
     base: Potential[DataWithAuxiliary],
     source: Sampler[DataWithAuxiliary],
-    omm_energy_model: OpenMMEnergyModel,
+    flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
+    omm_density: OpenMMDensity,
     num_samples: int,
     perturbation_noise: float,
-    ignore_charge_site: bool,
 ) -> LossFun:
     chain = key_chain(key)
     keys = jax.random.split(next(chain), num_samples)
@@ -82,34 +114,17 @@ def force_matching_loss_fn(
             + perturbation_noise
             * jax.random.normal(next(chain), samples.pos.shape)
         )
-    _, omm_forces = wrap_openmm_model(omm_energy_model)[1](
-        samples.pos, None, True
-    )
-
-    num_atoms = prod(samples.pos.shape[1:])
-    if ignore_charge_site:
-        mask = (jnp.arange(num_atoms) % 4) != 3
-        mask = jnp.tile(mask[None], (num_samples, 1))
-    else:
-        mask = jnp.ones((num_samples, num_atoms))
+    pred = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(samples)
+    target = jax.vmap(jax.grad(omm_density.potential))(samples)
 
     def evaluate(
         flow: Transform[DataWithAuxiliary, DataWithAuxiliary]
     ) -> Array:
-        flow_grads = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(
-            samples
-        )
-        mse = 0
-        mse += jnp.mean(
-            jnp.square(
-                -(
-                    flow_grads.pos.reshape(num_samples, -1)
-                    - omm_forces.reshape(num_samples, -1)
-                )
-                * mask
-            )
-        )
-        mse += jnp.mean(jnp.square(flow_grads.aux - samples.aux))
+        flow_potential = PushforwardPotential(base, flow)
+        loss = jax.vmap(
+            approximate_force_matching_loss, in_axes=(None, 0, 0, 0)
+        )(flow_potential, samples, pred, target)
+        mse = jnp.mean(loss)
         return mse
 
     return evaluate
@@ -263,11 +278,11 @@ def train_fn(
                     force_matching_loss_fn(
                         key=next(chain),
                         base=base.potential,
+                        flow=flow,
                         source=PullbackSampler(base.sample, flow),
-                        omm_energy_model=target.omm_model,
+                        omm_density=target,
                         num_samples=specs.num_samples,
                         perturbation_noise=specs.fm_model_perturbation_noise,
-                        ignore_charge_site=specs.fm_ignore_charge_site,
                     ),
                     specs.weight_fm_model,
                 )
@@ -279,11 +294,11 @@ def train_fn(
                     force_matching_loss_fn(
                         key=next(chain),
                         base=base.potential,
+                        flow=flow,
                         source=target.sample,
-                        omm_energy_model=target.omm_model,
+                        omm_density=target,
                         num_samples=specs.num_samples,
                         perturbation_noise=specs.fm_target_perturbation_noise,
-                        ignore_charge_site=specs.fm_ignore_charge_site,
                     ),
                     specs.weight_fm_target,
                 )

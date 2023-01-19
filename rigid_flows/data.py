@@ -9,12 +9,7 @@ from jax_dataclasses import pytree_dataclass
 
 from flox import geom
 
-from .system import (
-    ErrorHandling,
-    OpenMMEnergyModel,
-    SimulationBox,
-    SystemSpecification,
-)
+from .system import ErrorHandling, OpenMMEnergyModel, SimulationBox, SystemSpecification
 from .utils import smooth_maximum
 
 logger = logging.getLogger("rigid-flows")

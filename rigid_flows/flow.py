@@ -444,7 +444,7 @@ class PosUpdate(eqx.Module):
         params = self.net(input.aux, input.rigid.rot)
         params = params.reshape(*input.rigid.pos.shape, -1)
         params, gate = jnp.split(params, 2, axis=-1)
-        params = params * jax.nn.sigmoid(gate - 3.0)
+        params = params * jax.nn.sigmoid(gate - 6.0)
         reflection = params.reshape(*input.rigid.pos.shape, 2)
         reflection = jax.vmap(
             jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)

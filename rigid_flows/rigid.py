@@ -120,7 +120,7 @@ class Rigid:
     rot: jnp.ndarray  # = jnp.eye(4)[0]
     pos: jnp.ndarray  # = jnp.zeros(3)
     ics: InternalCoordinates  # = InternalCoordinates()
-    other: jnp.ndarray  # = VIRTUAL_SITE
+    # other: jnp.ndarray  # = VIRTUAL_SITE
 
     @staticmethod
     def from_array(inp: jnp.ndarray):
@@ -146,13 +146,13 @@ class Rigid:
 
         rot = mat_to_quat(R)
 
-        other = arr[3:] @ R.T
+        # other = arr[3:] @ R.T
 
-        return Rigid(rot, pos, ics, other)
+        return Rigid(rot, pos, ics)
 
     def asarray(self):
         arr = self.ics.asarray()
-        arr = jnp.concatenate([arr, self.other])
+        arr = jnp.concatenate([arr, jnp.zeros((1, 3))])
         R = quat_to_mat(self.rot)
         arr = arr @ R
         arr = arr + self.pos

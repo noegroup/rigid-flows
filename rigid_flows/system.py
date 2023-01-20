@@ -140,6 +140,8 @@ class OpenMMEnergyModel:
         mask[:, -1, :] = 0
         mask = mask.reshape(pos[0].shape)
 
+        pos = pos * mask[None]
+
         # iterate over batch dimension
         for i in range(len(pos)):
 

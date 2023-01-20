@@ -112,16 +112,8 @@ def force_matching_loss_fn(
     chain = key_chain(key)
     keys = jax.random.split(next(chain), num_samples)
     samples = jax.vmap(source)(keys).obj
-    if perturbation_noise > 0:
-        samples = lenses.bind(samples).pos.set(
-            samples.pos
-            + perturbation_noise
-            * jax.random.normal(next(chain), samples.pos.shape)
-        )
-    out, vjp = eqx.filter_vjp(
-        jax.vmap(PushforwardPotential(base, flow)), samples
-    )
-    pred = vjp(jnp.ones_like(out))[0]
+    
+    pred = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(samples)
     target = jax.vmap(jax.grad(omm_density.potential))(samples)
 
     def evaluate(

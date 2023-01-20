@@ -112,7 +112,7 @@ train:
     weight_vg_model: 0.
     weight_vg_target: 0.
   
-    num_samples: 128
+    num_samples: 64
 
     use_grad_clipping: false
     grad_clipping_ratio: 1.

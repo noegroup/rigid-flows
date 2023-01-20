@@ -229,7 +229,9 @@ class QuatUpdate(eqx.Module):
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...] | None,
-        num_pos: int = 3,
+        # num_pos: int,
+        num_blocks: int,
+        seq_len: int,
         *,
         key: KeyArray,
         **kwargs,
@@ -248,7 +250,7 @@ class QuatUpdate(eqx.Module):
         """
         chain = key_chain(key)
 
-        seq_len = 16
+        # seq_len = 16
         num_out = 4
         # num_aux = 3
         if auxiliary_shape is not None:
@@ -257,7 +259,7 @@ class QuatUpdate(eqx.Module):
             num_aux = None
         num_heads = 8
         num_channels = 32
-        num_blocks = 2
+        # num_blocks = 2
         self.net = RotConditioner(
             seq_len,
             2 * num_out,
@@ -330,8 +332,10 @@ class AuxUpdate(eqx.Module):
         num_pos: int,
         num_dims: int,
         num_low_rank: int,
+        num_blocks: int,
         low_rank_regularizer: float,
         transform: str,
+        seq_len: int,
         *,
         key: KeyArray,
         **kwargs,
@@ -348,12 +352,12 @@ class AuxUpdate(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         chain = key_chain(key)
-        seq_len = 16
-        num_aux = 3
+        # seq_len = 16
+        num_aux = auxiliary_shape[-1]
         num_out = 2 * num_aux
         num_heads = 8
         num_channels = 32
-        num_blocks = 2
+        # num_blocks = 2
         self.net = AuxConditioner(
             seq_len,
             2 * num_out,
@@ -403,21 +407,23 @@ class AuxUpdate(eqx.Module):
 class PosUpdate(eqx.Module):
 
     net: PosConditioner
-    num_bins: int
+    # num_bins: int
 
     def __init__(
         self,
-        auxiliary_shape,
-        num_pos,
-        num_dims,
+        auxiliary_shape: tuple[int, ...] | None,
+        num_pos: int,
+        num_dims: int,
+        num_blocks: int,
+        seq_len: int,
         *,
-        key,
+        key: KeyArray,
         **kwargs,
     ):
         chain = key_chain(key)
-        seq_len = 16
+        # seq_len = 16
 
-        self.num_bins = 64
+        # self.num_bins = 64
 
         # num_aux = 3
         if auxiliary_shape is None:
@@ -425,10 +431,10 @@ class PosUpdate(eqx.Module):
         else:
             num_aux = auxiliary_shape[-1]
         # num_out = 3 * (3 * self.num_bins + 1)
-        num_out = 3 * 2
+        num_out = num_pos * 2
         num_heads = 8
         num_channels = 32
-        num_blocks = 2
+        # num_blocks = 2
 
         self.net = PosConditioner(
             seq_len,

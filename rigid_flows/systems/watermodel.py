@@ -345,7 +345,7 @@ class WaterModel:
             else:
                 context.reinitialize()
 
-    def plot_2Dview(self, pos=None, box=None, toPBC=False):
+    def plot_2Dview(self, pos=None, box=None, toPBC=False, title=None):
         if pos is None:
             pos = self._positions
         if box is None:
@@ -377,6 +377,7 @@ class WaterModel:
             mypos = pos
 
         plt.figure(figsize=(15, 4))
+        plt.suptitle(title)
         for i in range(3):
             ii = (i + 1) % 3
             iii = (i + 2) % 3

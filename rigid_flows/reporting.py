@@ -407,16 +407,17 @@ class Reporter:
         flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
         num_iter: int,
     ):
-        return report_model(
-            key,
-            flow,
-            self.base,
-            self.target,
-            num_iter,
-            self.run_dir,
-            self.scope if self.scope else "",
-            self.specs,
-        )
+        if self.specs.num_samples is not None:
+            return report_model(
+                key,
+                flow,
+                self.base,
+                self.target,
+                num_iter,
+                self.run_dir,
+                self.scope if self.scope else "",
+                self.specs,
+            )
 
     def with_scope(self, scope) -> "Reporter":
         return Reporter(

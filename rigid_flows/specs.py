@@ -6,7 +6,7 @@ from mlparams.mlparams import from_yaml, to_yaml
 
 @pytree_dataclass(frozen=True)
 class ReportingSpecifications:
-    num_samples: int
+    num_samples: int | None
     num_samples_per_batch: int
     plot_quaternions: tuple[int, ...] | None
     plot_oxygens: bool
@@ -126,6 +126,7 @@ class SystemSpecification:
 
 @pytree_dataclass(frozen=True)
 class ModelSpecification:
+    # num_molecules: int
     auxiliary_shape: tuple[int, ...] | None
     flow: FlowSpecification
     base: SystemSpecification

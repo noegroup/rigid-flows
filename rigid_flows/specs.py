@@ -117,6 +117,8 @@ class SystemSpecification:
 
     water_type: str = "tip4pew"
 
+    num_samples: int | None = None
+
     def __str__(self) -> str:
         string = f"ice{self.ice_type}_T{self.temperature}_N{self.num_molecules}"
         if self.water_type != "tip4pew":

@@ -8,7 +8,12 @@ from typing import cast
 import equinox as eqx
 import git
 import jax
+import numpy as np
 import tensorflow as tf  # type: ignore
+from flox._src.flow.api import Transform
+from flox.flow import Pipe
+from flox.util import key_chain
+
 from rigid_flows.data import DataWithAuxiliary
 from rigid_flows.density import KeyArray, OpenMMDensity
 from rigid_flows.flow import (
@@ -20,10 +25,6 @@ from rigid_flows.flow import (
 from rigid_flows.reporting import Reporter, pretty_json
 from rigid_flows.specs import ExperimentSpecification
 from rigid_flows.train import run_training_stage
-
-from flox._src.flow.api import Transform
-from flox.flow import Pipe
-from flox.util import key_chain
 
 
 def backup_config_file(run_dir: str, specs_path: str):
@@ -44,13 +45,25 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
     chain = key_chain(key)
 
     logging.info("Loading base density.")
+    num_datapoints = specs.model.base.num_samples
+    if num_datapoints is not None:
+        logging.info(f"  taking only {num_datapoints} samples from MD")
+        selection = np.s_[:num_datapoints]
+    else:
+        selection = np.s_[:]
     base = OpenMMDensity.from_specs(
-        specs.model.auxiliary_shape, specs.model.base
+        specs.model.auxiliary_shape, specs.model.base, selection
     )
 
     logging.info(f"Loading target density.")
+    num_datapoints = specs.model.target.num_samples
+    if num_datapoints is not None:
+        logging.info(f"  taking only {num_datapoints} samples from MD")
+        selection = np.s_[:num_datapoints]
+    else:
+        selection = np.s_[:]
     target = OpenMMDensity.from_specs(
-        specs.model.auxiliary_shape, specs.model.target
+        specs.model.auxiliary_shape, specs.model.target, selection
     )
 
     logging.info(f"Setting up flow model.")
@@ -58,8 +71,6 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
         next(chain),
         specs.model.auxiliary_shape,
         specs.model.flow,
-        # base,
-        # target,
     )
 
     logging.info(f"Initializing ActNorm")

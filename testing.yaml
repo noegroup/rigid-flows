@@ -25,7 +25,7 @@ model:
   # num_molecules: 128 #TODO it would be nice if we could specify the sistem size only in one place
   
   # shape of the auxiliary variables
-  auxiliary_shape: [16, 3]
+  auxiliary_shape: [128, 3]
 
   # definition of the flow model
   flow:
@@ -33,7 +33,7 @@ model:
     couplings:
       - num_repetitions: 4
         auxiliary_update:
-          seq_len: 16
+          seq_len: 128
           activation: gelu
           num_pos: 3
           num_dims: 64
@@ -43,7 +43,7 @@ model:
           low_rank_regularizer: 0.
           transform: gated
         position_update:
-          seq_len: 16
+          seq_len: 128
           activation: gelu
           num_pos: 3
           num_dims: 64
@@ -53,7 +53,7 @@ model:
           low_rank_regularizer: 0.
           transform: gated
         quaternion_update:
-          seq_len: 16
+          seq_len: 128
           activation: gelu
           expansion_factor: 2
           num_blocks: 2
@@ -61,7 +61,7 @@ model:
       
   base:
     path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"
-    num_molecules: 16
+    num_molecules: 128
     temperature: 250
     ice_type: XI
     water_type: tip4pew
@@ -69,7 +69,7 @@ model:
     store_forces: false
     forces_path: null
     fixed_box: true
-    num_samples: 10_000
+    num_samples: null
 
     softcore_cutoff: null # 0.9
     softcore_potential: null # "linear"
@@ -77,15 +77,15 @@ model:
 
   target:
     path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"
-    num_molecules: 16
-    temperature: 100
+    num_molecules: 128
+    temperature: 50
     ice_type: XI
     water_type: tip4pew
     recompute_forces: false
     store_forces: false
     forces_path: null
     fixed_box: true
-    num_samples: 10_000
+    num_samples: null
 
     softcore_cutoff: null # 0.9
     softcore_potential: null # "linear"

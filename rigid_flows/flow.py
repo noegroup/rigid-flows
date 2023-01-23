@@ -111,7 +111,7 @@ class RigidWithAuxiliary:
     """
 
     rigid: Rigid
-    aux: Array
+    aux: Array | None
     box: SimulationBox
 
 

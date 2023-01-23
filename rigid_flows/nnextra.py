@@ -8,7 +8,7 @@ from flox.util import key_chain
 class PositionConditionerBlock(eqx.Module):
 
     nodes_kq: eqx.nn.Linear
-    aux_kq: eqx.nn.Linear
+    aux_kq: eqx.nn.Linear | None
     rot_kq: eqx.nn.Linear
     values: eqx.nn.Linear
     num_heads: int
@@ -16,7 +16,7 @@ class PositionConditionerBlock(eqx.Module):
     def __init__(
         self,
         node_dim: int,
-        num_aux: int,
+        num_aux: int | None,
         num_heads: int,
         num_channels: int,
         *,
@@ -27,9 +27,12 @@ class PositionConditionerBlock(eqx.Module):
         self.nodes_kq = eqx.nn.Linear(
             node_dim, num_heads * num_channels * 2, key=next(chain)
         )
-        self.aux_kq = eqx.nn.Linear(
-            num_aux, num_heads * num_channels * 2, key=next(chain)
-        )
+        if num_aux is not None:
+            self.aux_kq = eqx.nn.Linear(
+                num_aux, num_heads * num_channels * 2, key=next(chain)
+            )
+        else:
+            self.aux_kq = None
         self.rot_kq = eqx.nn.Linear(
             4, num_heads * num_channels * 2, use_bias=False, key=next(chain)
         )
@@ -49,19 +52,24 @@ class PositionConditionerBlock(eqx.Module):
             2,
             -1,
         )
-        aux_k, aux_q = jnp.split(
-            jax.vmap(self.aux_kq)(aux).reshape(seq_len, self.num_heads, -1),
-            2,
-            -1,
-        )
+        if aux is not None:
+            aux_k, aux_q = jnp.split(
+                jax.vmap(self.aux_kq)(aux).reshape(seq_len, self.num_heads, -1),
+                2,
+                -1,
+            )
         rot_k, rot_q = jnp.split(
             jax.vmap(self.rot_kq)(rot).reshape(seq_len, self.num_heads, -1),
             2,
             -1,
         )
 
-        k = jnp.concatenate([nodes_k, aux_k, rot_k], axis=-2)
-        q = jnp.concatenate([nodes_q, aux_q, rot_q], axis=-2)
+        if aux is not None:
+            k = jnp.concatenate([nodes_k, aux_k, rot_k], axis=-2)
+            q = jnp.concatenate([nodes_q, aux_q, rot_q], axis=-2)
+        else:
+            k = jnp.concatenate([nodes_k, rot_k], axis=-2)
+            q = jnp.concatenate([nodes_q, rot_q], axis=-2)
 
         logits = jnp.einsum("ihc, jhc -> ijh", k, q)
         logits = logits.at[..., -self.num_heads :].set(
@@ -100,7 +108,7 @@ class PosConditioner(eqx.Module):
         )
 
     def __call__(self, aux, rot):
-        seq_len = aux.shape[0]
+        seq_len = rot.shape[0]
         nodes = jnp.eye(seq_len)
         for block, norm in self.blocks:
             nodes = nodes + jax.vmap(norm)(block(nodes, aux, rot))
@@ -211,14 +219,14 @@ class RotationConditionerBlock(eqx.Module):
 
     nodes_kq: eqx.nn.Linear
     pos_kq: eqx.nn.Linear
-    aux_kq: eqx.nn.Linear
+    aux_kq: eqx.nn.Linear | None
     values: eqx.nn.Linear
     num_heads: int
 
     def __init__(
         self,
         node_dim: int,
-        num_aux: int,
+        num_aux: int | None,
         num_heads: int,
         num_channels: int,
         *,
@@ -232,12 +240,15 @@ class RotationConditionerBlock(eqx.Module):
         self.pos_kq = eqx.nn.Linear(
             2 * 3, num_heads * num_channels * 2, key=next(chain)
         )
-        self.aux_kq = eqx.nn.Linear(
-            num_aux,
-            num_heads * num_channels * 2,
-            use_bias=False,
-            key=next(chain),
-        )
+        if num_aux is not None:
+            self.aux_kq = eqx.nn.Linear(
+                num_aux,
+                num_heads * num_channels * 2,
+                use_bias=False,
+                key=next(chain),
+            )
+        else:
+            self.aux_kq = None
         self.values = eqx.nn.Linear(
             node_dim, node_dim * num_heads * 3, key=next(chain)
         )
@@ -264,14 +275,18 @@ class RotationConditionerBlock(eqx.Module):
             -1,
         )
 
-        aux_k, aux_q = jnp.split(
-            jax.vmap(self.aux_kq)(aux).reshape(seq_len, self.num_heads, -1),
-            2,
-            -1,
-        )
+        if aux is not None:
+            aux_k, aux_q = jnp.split(
+                jax.vmap(self.aux_kq)(aux).reshape(seq_len, self.num_heads, -1),
+                2,
+                -1,
+            )
 
-        k = jnp.concatenate([nodes_k, pos_k, aux_k], axis=-2)
-        q = jnp.concatenate([nodes_q, pos_q, aux_q], axis=-2)
+            k = jnp.concatenate([nodes_k, pos_k, aux_k], axis=-2)
+            q = jnp.concatenate([nodes_q, pos_q, aux_q], axis=-2)
+        else:
+            k = jnp.concatenate([nodes_k, pos_k], axis=-2)
+            q = jnp.concatenate([nodes_q, pos_q], axis=-2)
 
         logits = jnp.einsum("ihc, jhc -> ijh", k, q)
 

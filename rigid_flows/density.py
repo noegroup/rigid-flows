@@ -139,6 +139,32 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             sample = DataWithAuxiliary(pos, aux, sign, self.box, force)
             energy = self.potential(sample)
             return Transformed(sample, energy)
+    
+    def sample_idx(self, key: KeyArray, idx: jnp.ndarray) -> Transformed[DataWithAuxiliary]:
+        if self.data is None:
+            raise NotImplementedError(
+                "Sampling without provided data is not implemented."
+            )
+        else:
+            pos = self.data.pos[idx].reshape(-1, 4, 3)
+            pos = boxify(pos, self.box)
+
+            chain = key_chain(key)
+            if self.aux_model is None:
+                aux = None
+            else:
+                aux = self.aux_model.sample(seed=next(chain))
+
+            force = None
+            sign = jnp.sign(
+                jax.random.normal(
+                    next(chain), shape=(self.sys_specs.num_molecules, 1)
+                )
+            )
+
+            sample = DataWithAuxiliary(pos, aux, sign, self.box, force)
+            energy = self.potential(sample)
+            return Transformed(sample, energy)
 
     @staticmethod
     def from_specs(

@@ -3,7 +3,7 @@ seed: 42
 
 global_step: 0
 
-act_norm_init_samples: 128
+act_norm_init_samples: null #128
 
 reporting:
   num_samples: 1000 # null for no reporting
@@ -95,11 +95,11 @@ model:
 train:
 
   # first stage: only likelihood
-  - num_epochs: 3
-    num_iters_per_epoch: 100
+  - num_epochs: 10
+    num_iters_per_epoch: 500
 
     init_learning_rate: 1e-3
-    target_learning_rate: 1e-5
+    target_learning_rate: 1e-4
 
     weight_nll: 0.
 

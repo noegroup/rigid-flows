@@ -321,7 +321,7 @@ def sample_from_model(
     flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
 ) -> Transformed[DataWithAuxiliary]:
     latent = base.sample(key)
-    sample = bind(latent, Inverted(flow))
+    sample = bind(latent, flow)
     return sample
 
 
@@ -343,7 +343,7 @@ def compute_model_likelihood(
     flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
     base: OpenMMDensity,
 ):
-    latent, ldj = unpack(flow.forward(samples.obj))
+    latent, ldj = unpack(flow.inverse(samples.obj))
     return base.potential(latent) - ldj
 
 

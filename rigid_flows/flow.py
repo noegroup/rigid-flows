@@ -7,15 +7,14 @@ import equinox
 import equinox as eqx
 import jax
 import lenses
-from jax import Array
-from jax import numpy as jnp
-from jax_dataclasses import pytree_dataclass
-from jaxtyping import Float
-
 from flox import geom
 from flox._src.flow.impl import Affine, DistraxWrapper, Moebius
 from flox.flow import DoubleMoebius, Pipe, Transform, Transformed
 from flox.util import key_chain, unpack
+from jax import Array
+from jax import numpy as jnp
+from jax_dataclasses import pytree_dataclass
+from jaxtyping import Float
 
 from .data import DataWithAuxiliary
 from .density import OpenMMDensity
@@ -636,12 +635,10 @@ def build_flow(
 
     couplings = LayerStackedPipe(blocks, use_scan=True)
     # couplines = Pipe(blocks)
-    return Inverted(
-        Pipe(
-            [
-                EuclideanToRigidTransform(),
-                couplings,
-                Inverted(EuclideanToRigidTransform()),
-            ]
-        )
+    return Pipe(
+        [
+            EuclideanToRigidTransform(),
+            couplings,
+            Inverted(EuclideanToRigidTransform()),
+        ]
     )

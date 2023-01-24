@@ -75,9 +75,9 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             )
             results["omm"] = energy(inp.pos)
         if aux and self.aux_model is not None:
-            results["aux"] = -self.aux_model.log_prob(inp.aux).sum(
-                axis=(-2, -1)
-            )
+            results["aux"] = 0 #-self.aux_model.log_prob(inp.aux).sum(
+                # axis=(-2, -1)
+            # )
 
         return results
 

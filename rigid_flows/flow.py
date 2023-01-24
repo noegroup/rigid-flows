@@ -279,7 +279,7 @@ class QuatUpdate(eqx.Module):
         Returns:
             Array: the parameter (reflection) of the double moebius transform
         """
-        out = self.net(input.rigid.pos, input.aux)
+        out = self.net(input.rigid.pos, input.aux * 0)
 
         reflection, gate = jnp.split(out, 2, axis=-1)
 
@@ -447,7 +447,7 @@ class PosUpdate(eqx.Module):
         )
 
     def params(self, input: RigidWithAuxiliary):
-        params = self.net(input.aux, input.rigid.rot)
+        params = self.net(input.aux * 0, input.rigid.rot)
         params = params.reshape(*input.rigid.pos.shape, -1)
         params, gate = jnp.split(params, 2, axis=-1)
         params = params * jax.nn.sigmoid(gate - 6.0)
@@ -560,7 +560,7 @@ def _coupling(
     chain = key_chain(key)
     blocks = []
     for _ in range(specs.num_repetitions):
-        if auxiliary_shape is not None:
+        if False: #auxiliary_shape is not None:
             aux_block = [
                 AuxUpdate(
                     auxiliary_shape=auxiliary_shape,
@@ -581,7 +581,7 @@ def _coupling(
             if auxiliary_shape is not None:
                 aux_block += [ActNorm(lenses.lens.aux)]
 
-        if auxiliary_shape is not None:
+        if False: #auxiliary_shape is not None:
             sub_block = Pipe(
                 [
                     *aux_block,

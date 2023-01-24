@@ -33,7 +33,7 @@ Auxiliary = Float[Array, f"... AUX"]
 
 Atoms = Float[Array, "... MOL 4 3"]
 
-MOEBIUS_SLACK = 0.9999
+MOEBIUS_SLACK = 0.95
 
 class RigidTransform(Transform[Atoms, Rigid]):
     def forward(self, inp: Atoms) -> Transformed[Rigid]:

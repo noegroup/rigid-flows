@@ -78,7 +78,7 @@ model:
   target:
     path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"
     num_molecules: 16
-    temperature: 100
+    temperature: 50
     ice_type: XI
     water_type: tip4pew
     recompute_forces: false
@@ -96,10 +96,10 @@ train:
 
   # first stage: only likelihood
   - num_epochs: 10
-    num_iters_per_epoch: 500
+    num_iters_per_epoch: 1000
 
     init_learning_rate: 1e-3
-    target_learning_rate: 1e-4
+    target_learning_rate: 1e-5
 
     weight_nll: 0.
 

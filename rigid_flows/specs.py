@@ -143,7 +143,7 @@ class ExperimentSpecification:
     train: tuple[TrainingSpecification]
     reporting: ReportingSpecifications
     global_step: int | None
-    act_norm_init_samples: int
+    act_norm_init_samples: int | None
 
     @staticmethod
     def load_from_file(path: str) -> "ExperimentSpecification":

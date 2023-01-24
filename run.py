@@ -73,19 +73,20 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
         specs.model.flow,
     )
 
-    logging.info(f"Initializing ActNorm")
+    if specs.act_norm_init_samples is not None:
+        logging.info(f"Initializing ActNorm")
 
-    @eqx.filter_jit
-    def init_actnorm(flow, key):
-        actnorm_batch = jax.vmap(target.sample)(
-            jax.random.split(key, specs.act_norm_init_samples)
-        ).obj
-        flow = toggle_layer_stack(flow, False)
-        flow, _ = initialize_actnorm(flow, actnorm_batch)
-        flow = toggle_layer_stack(flow, True)
-        return flow
+        @eqx.filter_jit
+        def init_actnorm(flow, key):
+            actnorm_batch = jax.vmap(target.sample)(
+                jax.random.split(key, specs.act_norm_init_samples)
+            ).obj
+            flow = toggle_layer_stack(flow, False)
+            flow, _ = initialize_actnorm(flow, actnorm_batch)
+            flow = toggle_layer_stack(flow, True)
+            return flow
 
-    flow = init_actnorm(flow, next(chain))
+        flow = init_actnorm(flow, next(chain))
 
     if specs.model.pretrained_model_path is not None:
         logging.info(

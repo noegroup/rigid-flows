@@ -7,15 +7,14 @@ import equinox
 import equinox as eqx
 import jax
 import lenses
-from jax import Array
-from jax import numpy as jnp
-from jax_dataclasses import pytree_dataclass
-from jaxtyping import Float
-
 from flox import geom
 from flox._src.flow.impl import Affine, DistraxWrapper, Moebius
 from flox.flow import DoubleMoebius, Pipe, Transform, Transformed
 from flox.util import key_chain, unpack
+from jax import Array
+from jax import numpy as jnp
+from jax_dataclasses import pytree_dataclass
+from jaxtyping import Float
 
 from .data import DataWithAuxiliary
 from .density import OpenMMDensity
@@ -34,6 +33,7 @@ Auxiliary = Float[Array, f"... AUX"]
 
 Atoms = Float[Array, "... MOL 4 3"]
 
+MOEBIUS_SLACK = 0.95
 
 class RigidTransform(Transform[Atoms, Rigid]):
     def forward(self, inp: Atoms) -> Transformed[Rigid]:
@@ -286,7 +286,7 @@ class QuatUpdate(eqx.Module):
         reflection = reflection * jax.nn.sigmoid(gate - 3.0)
 
         reflection = reflection.reshape(input.rigid.rot.shape)
-        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)(
+        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * MOEBIUS_SLACK)(
             reflection
         )
 
@@ -453,7 +453,7 @@ class PosUpdate(eqx.Module):
         params = params * jax.nn.sigmoid(gate - 6.0)
         reflection = params.reshape(*input.rigid.pos.shape, 2)
         reflection = jax.vmap(
-            jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)
+            jax.vmap(lambda x: x / (1 + geom.norm(x)) * MOEBIUS_SLACK)
         )(reflection)
         return reflection
 
@@ -635,12 +635,10 @@ def build_flow(
 
     couplings = LayerStackedPipe(blocks, use_scan=True)
     # couplines = Pipe(blocks)
-    return Inverted(
-        Pipe(
-            [
-                EuclideanToRigidTransform(),
-                couplings,
-                Inverted(EuclideanToRigidTransform()),
-            ]
-        )
+    return Pipe(
+        [
+            EuclideanToRigidTransform(),
+            couplings,
+            Inverted(EuclideanToRigidTransform()),
+        ]
     )

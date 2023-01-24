@@ -127,12 +127,12 @@ def kullback_leiber_divergence_fn(
     def evaluate(
         flow: Transform[DataWithAuxiliary, DataWithAuxiliary]
     ) -> Array:
-        if not reverse:
-            out = jax.vmap(PushforwardSampler(target.sample, flow))(keys)
-            return jnp.mean(jax.vmap(base.potential)(out.obj) - out.ldj)
-        else:
-            out = jax.vmap(PullbackSampler(base.sample, flow))(keys)
+        if reverse:
+            out = jax.vmap(PushforwardSampler(base.sample, flow))(keys)
             return jnp.mean(jax.vmap(target.potential)(out.obj) - out.ldj)
+        else:
+            out = jax.vmap(PullbackSampler(target.sample, flow))(keys)
+            return jnp.mean(jax.vmap(base.potential)(out.obj) - out.ldj)
 
     return evaluate
 

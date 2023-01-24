@@ -34,6 +34,7 @@ Auxiliary = Float[Array, f"... AUX"]
 
 Atoms = Float[Array, "... MOL 4 3"]
 
+MOEBIUS_SLACK = 0.9999
 
 class RigidTransform(Transform[Atoms, Rigid]):
     def forward(self, inp: Atoms) -> Transformed[Rigid]:
@@ -286,7 +287,7 @@ class QuatUpdate(eqx.Module):
         reflection = reflection * jax.nn.sigmoid(gate - 3.0)
 
         reflection = reflection.reshape(input.rigid.rot.shape)
-        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)(
+        reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * MOEBIUS_SLACK)(
             reflection
         )
 
@@ -453,7 +454,7 @@ class PosUpdate(eqx.Module):
         params = params * jax.nn.sigmoid(gate - 6.0)
         reflection = params.reshape(*input.rigid.pos.shape, 2)
         reflection = jax.vmap(
-            jax.vmap(lambda x: x / (1 + geom.norm(x)) * 0.9999)
+            jax.vmap(lambda x: x / (1 + geom.norm(x)) * MOEBIUS_SLACK)
         )(reflection)
         return reflection
 

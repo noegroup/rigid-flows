@@ -36,6 +36,7 @@ class WaterModel:
             "tip5p",
             "spce",
             "tip4pew-customLJ",
+            "tip4pice",
         ]:
             print(
                 f"+++ WARNING: Unknown water_type `{water_type}` +++",
@@ -52,10 +53,9 @@ class WaterModel:
         ), "mismatch between number of atoms per molecule and total number of atoms"
         n_waters = len(positions) // n_sites
 
-        mdtraj_topology = self.generate_mdtraj_topology(n_waters, n_sites)
-
-        topology = mdtraj_topology.to_openmm()
-        topology.setPeriodicBoxVectors(box)
+        # mdtraj_topology = self.generate_mdtraj_topology(n_waters, n_sites)
+        # topology = mdtraj_topology.to_openmm()
+        # topology.setPeriodicBoxVectors(box)
 
         if nonbondedCutoff > np.diagonal(box).min() / 2:
             epsilon = 1e-5
@@ -65,16 +65,30 @@ class WaterModel:
                 file=stderr,
             )
 
-        ff = openmm.app.ForceField(
-            water_type.removesuffix("-customLJ") + ".xml"
-        )
-        system = ff.createSystem(
-            topology,
-            nonbondedMethod=openmm.app.PME,
-            nonbondedCutoff=nonbondedCutoff,
-            rigidWater=rigidWater,
-            removeCMMotion=True,
-        )
+        mdtraj_topology = self.generate_mdtraj_topology(n_waters, n_sites)
+
+        if "tip4pice" in water_type:
+            ff = openmm.app.GromacsTopFile("tip4p-ice.top", periodicBoxVectors=box)
+            topology = ff.topology
+            system = ff.createSystem(
+                nonbondedMethod=openmm.app.PME,
+                nonbondedCutoff=nonbondedCutoff,
+                # rigidWater=rigidWater,
+                removeCMMotion=True,
+            )
+        else:
+            ff = openmm.app.ForceField(
+                water_type.removesuffix("-customLJ") + ".xml"
+            )
+            topology = mdtraj_topology.to_openmm()
+            topology.setPeriodicBoxVectors(box)
+            system = ff.createSystem(
+                topology,
+                nonbondedMethod=openmm.app.PME,
+                nonbondedCutoff=nonbondedCutoff,
+                rigidWater=rigidWater,
+                removeCMMotion=True,
+            )
         forces = {f.__class__.__name__: f for f in system.getForces()}
         forces["NonbondedForce"].setUseSwitchingFunction(False)
         forces["NonbondedForce"].setUseDispersionCorrection(True)
@@ -444,13 +458,15 @@ class WaterModel:
             plt.gca().set_aspect(1)
         plt.show()
 
-    def get_mdtraj(self, pos=None, box=None):
+    def get_mdtraj(self, pos=None, box=None, mdtraj_topology=None):
         if pos is None:
             pos = self._positions
         if box is None:
             box = self._box
+        if mdtraj_topology is None:
+            mdtraj_topology = self.mdtraj_topology
 
-        traj = md.Trajectory(pos, self.mdtraj_topology)
+        traj = md.Trajectory(pos, mdtraj_topology)
         traj.unitcell_vectors = np.resize(box, (len(traj), 3, 3))
 
         return traj
@@ -473,13 +489,20 @@ class WaterModel:
         plt.xlabel("r [nm]")
         plt.xlim(r_range)
 
-    def get_view(self, pos=None, box=None):
+    def get_view(self, pos=None, box=None, virtualsites=True):
         """visualize in notebook with nglview"""
         if nv is None:
             print("+++ WARNING: nglview not available +++", file=stderr)
             return None
-
-        view = nv.show_mdtraj(self.get_mdtraj(pos, box))
+        if virtualsites or self.n_sites == 3:
+            view = nv.show_mdtraj(self.get_mdtraj(pos, box))
+        else:
+            mask_vs = np.tile(np.concatenate((3*[True], (self.n_sites-3)*[False])), self.n_waters)
+            if pos is None:
+                pos = self._positions[None]
+            if len(pos.shape) == 2:
+                pos = pos[None]
+            view = nv.show_mdtraj(self.get_mdtraj(pos[:,mask_vs], box, self.generate_mdtraj_topology(self.n_waters, 3)))
         view.add_representation("ball+stick", selection="water")
         view.add_unitcell()
         return view

@@ -53,9 +53,9 @@ class WaterModel:
         ), "mismatch between number of atoms per molecule and total number of atoms"
         n_waters = len(positions) // n_sites
 
-        # mdtraj_topology = self.generate_mdtraj_topology(n_waters, n_sites)
-        # topology = mdtraj_topology.to_openmm()
-        # topology.setPeriodicBoxVectors(box)
+        mdtraj_topology = self.generate_mdtraj_topology(n_waters, n_sites)
+        topology = mdtraj_topology.to_openmm()
+        topology.setPeriodicBoxVectors(box)
 
         if nonbondedCutoff > np.diagonal(box).min() / 2:
             epsilon = 1e-5
@@ -65,50 +65,32 @@ class WaterModel:
                 file=stderr,
             )
 
-        mdtraj_topology = self.generate_mdtraj_topology(n_waters, n_sites)
-
+        ff_filename = water_type.removesuffix("-customLJ") + ".xml"
         if "tip4pice" in water_type:
-            ff = openmm.app.GromacsTopFile("tip4p-ice.top", periodicBoxVectors=box)
-            topology = ff.topology
-            system = ff.createSystem(
-                nonbondedMethod=openmm.app.PME,
-                nonbondedCutoff=nonbondedCutoff,
-                # rigidWater=rigidWater,
-                removeCMMotion=True,
-            )
-        else:
-            ff = openmm.app.ForceField(
-                water_type.removesuffix("-customLJ") + ".xml"
-            )
-            topology = mdtraj_topology.to_openmm()
-            topology.setPeriodicBoxVectors(box)
-            system = ff.createSystem(
-                topology,
-                nonbondedMethod=openmm.app.PME,
-                nonbondedCutoff=nonbondedCutoff,
-                rigidWater=rigidWater,
-                removeCMMotion=True,
-            )
+            import os
+            ff_filename = f"{os.path.dirname(__file__)}/{ff_filename}"
+        ff = openmm.app.ForceField(ff_filename)
+        system = ff.createSystem(
+            topology,
+            nonbondedMethod=openmm.app.PME,
+            nonbondedCutoff=nonbondedCutoff,
+            rigidWater=rigidWater,
+            removeCMMotion=True,
+        )
         forces = {f.__class__.__name__: f for f in system.getForces()}
         forces["NonbondedForce"].setUseSwitchingFunction(False)
         forces["NonbondedForce"].setUseDispersionCorrection(True)
         forces["NonbondedForce"].setEwaldErrorTolerance(1e-4)  # default is 5e-4
         oxygen_parameters = forces["NonbondedForce"].getParticleParameters(0)
-        self.charge_O = oxygen_parameters[0].value_in_unit(
-            unit.elementary_charge
-        )
+        self.charge_O = oxygen_parameters[0].value_in_unit(unit.elementary_charge)
         self.sigma_O = oxygen_parameters[1].value_in_unit(unit.nanometer)
-        self.epsilon_O = oxygen_parameters[2].value_in_unit(
-            unit.kilojoule_per_mole
-        )
+        self.epsilon_O = oxygen_parameters[2].value_in_unit(unit.kilojoule_per_mole)
 
         if "customLJ" in water_type:
             # remove LJ interaction
             oxygen_parameters[2] *= 0  # set epsilon_O to zero
             for i in range(0, system.getNumParticles(), n_sites):
-                forces["NonbondedForce"].setParticleParameters(
-                    i, *oxygen_parameters
-                )
+                forces["NonbondedForce"].setParticleParameters(i, *oxygen_parameters)
 
             # add equivalent CustomNonbondedForce
             Ulj_str = f"4*{self.epsilon_O}*(({self.sigma_O}/r)^12-({self.sigma_O}/r)^6)"
@@ -145,9 +127,7 @@ class WaterModel:
 
         self._positions = np.array(positions)
         self._box = np.array(box)
-        self.is_box_orthorombic = not np.count_nonzero(
-            box - np.diag(np.diag(box))
-        )
+        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diag(box)))
 
         self.n_waters = n_waters
         self.n_sites = n_sites
@@ -173,9 +153,7 @@ class WaterModel:
         self._box = np.array(box)
         self.topology.setPeriodicBoxVectors(box)
         self.system.setDefaultPeriodicBoxVectors(*box)
-        self.is_box_orthorombic = not np.count_nonzero(
-            box - np.diag(np.diag(box))
-        )
+        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diag(box)))
 
     @staticmethod
     def generate_mdtraj_topology(n_waters, n_sites=4):
@@ -222,14 +200,10 @@ class WaterModel:
         if barostat is None:
             pass
         elif barostat == "iso":
-            self.system.addForce(
-                openmm.MonteCarloBarostat(pressure, temperature)
-            )
+            self.system.addForce(openmm.MonteCarloBarostat(pressure, temperature))
         elif barostat == "aniso":
             self.system.addForce(
-                openmm.MonteCarloAnisotropicBarostat(
-                    3 * [pressure], temperature
-                )
+                openmm.MonteCarloAnisotropicBarostat(3 * [pressure], temperature)
             )
         elif barostat == "tri":
             self.system.addForce(
@@ -314,9 +288,7 @@ class WaterModel:
                     ),
                 ):
                     force.setDefaultTemperature(temperature)
-        simulation = openmm.app.Simulation(
-            self.topology, self.system, integrator
-        )
+        simulation = openmm.app.Simulation(self.topology, self.system, integrator)
         simulation.context.setPositions(self.positions)
 
         if minimizeEnergy:
@@ -336,9 +308,7 @@ class WaterModel:
 
         return simulation
 
-    def set_customLJ(
-        self, energy_expression, context=None, keep_positions=False
-    ):
+    def set_customLJ(self, energy_expression, context=None, keep_positions=False):
         """energy_expression: the new Lennard Jones expression, using 'r' for atoms distance"""
 
         if "customLJ" not in self.water_type:
@@ -384,9 +354,7 @@ class WaterModel:
             if self.is_box_orthorombic:
                 mypos = pos % np.diagonal(av_box)
             else:
-                raise NotImplementedError(
-                    "only available for fixed orthorombic box"
-                )
+                raise NotImplementedError("only available for fixed orthorombic box")
         else:
             mypos = pos
 
@@ -497,12 +465,21 @@ class WaterModel:
         if virtualsites or self.n_sites == 3:
             view = nv.show_mdtraj(self.get_mdtraj(pos, box))
         else:
-            mask_vs = np.tile(np.concatenate((3*[True], (self.n_sites-3)*[False])), self.n_waters)
+            mask_vs = np.tile(
+                np.concatenate((3 * [True], (self.n_sites - 3) * [False])),
+                self.n_waters,
+            )
             if pos is None:
                 pos = self._positions[None]
             if len(pos.shape) == 2:
                 pos = pos[None]
-            view = nv.show_mdtraj(self.get_mdtraj(pos[:,mask_vs], box, self.generate_mdtraj_topology(self.n_waters, 3)))
+            view = nv.show_mdtraj(
+                self.get_mdtraj(
+                    pos[:, mask_vs],
+                    box,
+                    self.generate_mdtraj_topology(self.n_waters, 3),
+                )
+            )
         view.add_representation("ball+stick", selection="water")
         view.add_unitcell()
         return view

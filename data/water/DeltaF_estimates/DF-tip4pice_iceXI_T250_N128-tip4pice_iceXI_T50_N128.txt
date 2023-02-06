@@ -1,0 +1,2 @@
+# DeltaF  std ## MBAR 15 replicas, 100_000 samples
+-16326.12581    0.04552

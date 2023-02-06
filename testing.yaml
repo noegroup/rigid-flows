@@ -14,7 +14,7 @@ reporting:
   report_ess: True
   report_likelihood: false 
   save_model: true
-  save_samples: true
+  save_samples: false
   save_statistics: true
 
 model:
@@ -96,10 +96,10 @@ train:
 
   # first stage: only likelihood
   - num_epochs: 10
-    num_iters_per_epoch: 5000
+    num_iters_per_epoch: 2000
 
     init_learning_rate: 1e-3
-    target_learning_rate: 1e-5
+    target_learning_rate: 1e-4
 
     weight_nll: 0.
 

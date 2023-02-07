@@ -22,10 +22,10 @@ model:
   # set if model is trained with warm start
   pretrained_model_path: null # runs/2022-12-13_19:18:20/training_stage_0/epoch_1/model.eqx 
 
-  # num_molecules: 128 #TODO it would be nice if we could specify the sistem size only in one place
+  # num_molecules: 16 #TODO it would be nice if we could specify the sistem size only in one place
   
   # shape of the auxiliary variables
-  auxiliary_shape: [128, 3]
+  auxiliary_shape: [16, 3]
 
   # definition of the flow model
   flow:
@@ -33,7 +33,7 @@ model:
     couplings:
       - num_repetitions: 4
         auxiliary_update:
-          seq_len: 128
+          seq_len: 16
           activation: gelu
           num_pos: 3
           num_dims: 64
@@ -43,7 +43,7 @@ model:
           low_rank_regularizer: 0.
           transform: gated
         position_update:
-          seq_len: 128
+          seq_len: 16
           activation: gelu
           num_pos: 3
           num_dims: 64
@@ -53,7 +53,7 @@ model:
           low_rank_regularizer: 0.
           transform: gated
         quaternion_update:
-          seq_len: 128
+          seq_len: 16
           activation: gelu
           expansion_factor: 2
           num_blocks: 2
@@ -61,10 +61,10 @@ model:
       
   base:
     path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"
-    num_molecules: 128
+    num_molecules: 16
     temperature: 250
     ice_type: XI
-    water_type: tip4pew
+    water_type: tip4pice
     recompute_forces: false
     store_forces: false
     forces_path: null
@@ -77,10 +77,10 @@ model:
 
   target:
     path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"
-    num_molecules: 128
+    num_molecules: 16
     temperature: 100
     ice_type: XI
-    water_type: tip4pew
+    water_type: tip4pice
     recompute_forces: false
     store_forces: false
     forces_path: null
@@ -96,10 +96,10 @@ train:
 
   # first stage: only likelihood
   - num_epochs: 10
-    num_iters_per_epoch: 5000
+    num_iters_per_epoch: 500
 
     init_learning_rate: 1e-3
-    target_learning_rate: 1e-5
+    target_learning_rate: 1e-4
 
     weight_nll: 0.
 
@@ -114,7 +114,7 @@ train:
     weight_vg_model: 0.
     weight_vg_target: 0.
   
-    num_samples: 32
+    num_samples: 64
 
     use_grad_clipping: false
     grad_clipping_ratio: 1.

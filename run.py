@@ -94,9 +94,7 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
         )
         flow = cast(
             Pipe[DataWithAuxiliary, RigidWithAuxiliary],
-            eqx.tree_deserialise_leaves(
-                specs.model.pretrained_model_path, flow
-            ),
+            eqx.tree_deserialise_leaves(specs.model.pretrained_model_path, flow),
         )
 
     return base, target, flow
@@ -157,15 +155,12 @@ def main():
 
     writer, local_run_dir = setup_tensorboard(args.run_dir, args.label)
 
-    logging.getLogger().setLevel(logging.INFO)
+    logging.basicConfig(level=logging.INFO)
+    fh = logging.FileHandler(f"{local_run_dir}/logs.txt")
+    logging.getLogger().addHandler(fh)
 
     logging.info(f"Logging tensorboard logs to {local_run_dir}.")
-
-    logging.basicConfig(
-        filename=f"logs.txt",
-        filemode="w",
-        encoding="utf-8",
-    )
+    logging.warning("test warning")
 
     logging.info(f"Loading specs from {args.specs}.")
     specs = ExperimentSpecification.load_from_file(args.specs)
@@ -178,9 +173,7 @@ def main():
 
     tot_iter = specs.global_step if specs.global_step is not None else 0
     with writer.as_default():
-        flow = train(
-            next(chain), local_run_dir, specs, base, target, flow, tot_iter
-        )
+        flow = train(next(chain), local_run_dir, specs, base, target, flow, tot_iter)
 
 
 if __name__ == "__main__":

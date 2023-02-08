@@ -95,7 +95,7 @@ model:
 train:
 
   # first stage: only likelihood
-  - num_epochs: 3
+  - num_epochs: 5
     num_iters_per_epoch: 500
 
     init_learning_rate: 1e-3

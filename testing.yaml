@@ -11,11 +11,11 @@ reporting:
   plot_quaternions: null
   plot_oxygens: false
   plot_energy_histograms: false
-  report_ess: True
-  report_likelihood: false 
+  report_ess: true
+  report_likelihood: false
   save_model: true
-  save_samples: true
-  save_statistics: true
+  save_samples: false
+  save_statistics: false
 
 model:
 
@@ -69,7 +69,7 @@ model:
     store_forces: false
     forces_path: null
     fixed_box: true
-    num_samples: null
+    num_samples: 10_000
 
     softcore_cutoff: null # 0.9
     softcore_potential: null # "linear"
@@ -85,7 +85,7 @@ model:
     store_forces: false
     forces_path: null
     fixed_box: true
-    num_samples: null
+    num_samples: 10_000
 
     softcore_cutoff: null # 0.9
     softcore_potential: null # "linear"
@@ -95,7 +95,7 @@ model:
 train:
 
   # first stage: only likelihood
-  - num_epochs: 10
+  - num_epochs: 3
     num_iters_per_epoch: 500
 
     init_learning_rate: 1e-3
@@ -114,7 +114,7 @@ train:
     weight_vg_model: 0.
     weight_vg_target: 0.
   
-    num_samples: 64
+    num_samples: 32
 
     use_grad_clipping: false
     grad_clipping_ratio: 1.

@@ -160,7 +160,6 @@ def main():
     logging.getLogger().addHandler(fh)
 
     logging.info(f"Logging tensorboard logs to {local_run_dir}.")
-    logging.warning("test warning")
 
     logging.info(f"Loading specs from {args.specs}.")
     specs = ExperimentSpecification.load_from_file(args.specs)

@@ -8,24 +8,28 @@ from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 
-from .system import (
-    ErrorHandling,
-    OpenMMEnergyModel,
-    SimulationBox,
-    SystemSpecification,
-)
-from .utils import smooth_maximum
+from .system import ErrorHandling, OpenMMEnergyModel, SimulationBox, SystemSpecification
+
+# from .utils import smooth_maximum
 
 logger = logging.getLogger("rigid-flows")
 
 
-def unwrap(pos: jnp.ndarray, box: SimulationBox):
+def unwrap(pos: jnp.ndarray, box: jnp.ndarray):
     """ "Using as reference the first configuration"""
     return jnp.where(
-        jnp.abs(pos - pos[0]) / box.size > 0.5,
-        pos - jnp.sign(pos - pos[0]) * box.size,
+        jnp.abs(pos - pos[0]) / box > 0.5,
+        pos - jnp.sign(pos - pos[0]) * box,
         pos,
     )
+
+
+def boxify_oxy(pos, box: jnp.ndarray):
+    oxy = pos[..., 0, :]
+    boxed_oxy = oxy % box
+    diff = boxed_oxy - oxy
+    pos = pos + diff[..., None, :]
+    return pos
 
 
 @pytree_dataclass(frozen=True)
@@ -40,27 +44,25 @@ class Data:
     @staticmethod
     def from_specs(
         specs: SystemSpecification,
-        box: SimulationBox,
+        omm_model: OpenMMEnergyModel,
         selection: slice = np.s_[:],
     ):
         path = f"{specs.path}/MDtraj-{specs}.npz"
         logging.info(f"Loading data from {path}")
         raw = np.load(path)
-        data = Data(*map(jnp.array, raw.values()))
-        data = lenses.bind(data).pos.set(
-            data.pos[selection].reshape(data.pos[selection].shape[0], -1, 4, 3)
+        if raw["box"].shape[0] == 1:
+            assert jnp.allclose(
+                raw["box"][0], omm_model.model.box
+            ), "model and MDtraj box differ"
+
+        data = Data(
+            pos=raw["pos"][selection].reshape(
+                -1, omm_model.model.n_waters, omm_model.model.n_sites, 3
+            ),
+            box=jax.vmap(jnp.diag)(raw["box"][selection]),
+            energy=raw["ene"][selection],
+            force=None,
         )
-        data = lenses.bind(data).pos.set(unwrap(data.pos, box))
-        data = lenses.bind(data).energy.set(data.energy[selection])
-        if data.force is not None:
-            data = lenses.bind(data).force.set(data.force[selection])
-        if data.box.shape[0] > 1:
-            data = lenses.bind(data).box.set(data.box[selection])
-        if data.box.shape[1:] == (3, 3):
-            data = Data(
-                data.pos, jax.vmap(jnp.diag)(data.box), data.energy, data.force
-            )
-        assert data.box.shape[1:] == (3,)
 
         return data
 
@@ -93,42 +95,21 @@ class PreprocessedData:
     box: jnp.ndarray
     energy: jnp.ndarray
     force: jnp.ndarray | None
-    modes: jnp.ndarray
-    stds: jnp.ndarray
 
     @staticmethod
-    def from_data(data: Data, box: SimulationBox) -> "PreprocessedData":
-        oxy = data.pos[:, :, 0]
+    def from_data(data: Data) -> "PreprocessedData":
 
-        modes = jax.vmap(
-            jax.vmap(smooth_maximum, in_axes=1, out_axes=0),
-            in_axes=2,
-            out_axes=1,
-        )(oxy)
-
-        modes = jnp.mean(oxy, axis=0)
-        stds = jnp.std(oxy, axis=0)
-
-        pos = data.pos
-        # unwrap positions
-        # pos = modes[:, None] + geom.Torus(box.size).tangent(
-        #     data.pos, data.pos - modes[:, None]
-        # )
-        ## remove com position. is this useful?
+        ## remove com position (but it should already be almost ok)
+        pos = unwrap(data.pos, data.box)
         pos = (
             pos
             - pos.mean(axis=(1, 2), keepdims=True)
             + pos.mean(axis=(0, 1, 2), keepdims=True)
         )
+        # make sure oxygen positions are in the box
+        pos = boxify_oxy(pos, data.box)
 
-        return PreprocessedData(
-            pos, data.box, data.energy, data.force, modes, stds
-        )
-
-    def estimate_com_stats(self):
-        pos = self.pos.reshape(self.pos.shape[0], -1, 4, 3)
-        coms = pos.mean(axis=(1, 2))
-        return jnp.mean(coms, axis=0), jnp.std(coms, axis=0)
+        return PreprocessedData(pos, data.box, data.energy, data.force)
 
 
 @pytree_dataclass(frozen=True)

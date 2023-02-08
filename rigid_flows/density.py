@@ -5,10 +5,9 @@ import jax
 import jax.numpy as jnp
 import numpy as np
 import tensorflow_probability.substrates.jax as tfp  # type: ignore
-from jax import Array
-
 from flox.flow import Transformed
 from flox.util import key_chain
+from jax import Array
 
 from .data import Data, DataWithAuxiliary, PreprocessedData
 from .specs import SystemSpecification
@@ -25,14 +24,6 @@ class DensityModel(Protocol[T]):
 
     def sample(self, key: KeyArray) -> Transformed[T]:
         ...
-
-
-def boxify(pos, box: SimulationBox):
-    oxy = pos[..., 0, :]
-    boxed_oxy = oxy % box.size
-    diff = boxed_oxy - oxy
-    pos = pos + diff[..., None, :]
-    return pos
 
 
 class OpenMMDensity(DensityModel[DataWithAuxiliary]):
@@ -75,8 +66,9 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             )
             results["omm"] = energy(inp.pos)
         if aux and self.aux_model is not None:
-            results["aux"] = 0 #-self.aux_model.log_prob(inp.aux).sum(
-                # axis=(-2, -1)
+            results["aux"] = 0  
+            # -self.aux_model.log_prob(inp.aux).sum(
+            # axis=(-2, -1)
             # )
 
         return results
@@ -98,8 +90,19 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             jnp.zeros(()),
         )
 
-    def sample(self, key: KeyArray) -> Transformed[DataWithAuxiliary]:
+    def sample(
+        self, key: KeyArray
+    ) -> Transformed[DataWithAuxiliary]:  # FIXME super slow!
+        """Samples from the target (data) distribution."""
+        idx = jax.random.randint(key, minval=0, maxval=len(self.data.pos), shape=())
+        return self.sample_idx(key, idx)
+
+    def sample_idx(
+        self, key: KeyArray, idx: jnp.ndarray
+    ) -> Transformed[DataWithAuxiliary]:
         """Samples from the target (data) distribution.
+
+        Positions are taken from MD trajectory.
 
         Auxiliaries are drawn from a standard normal distribution.
 
@@ -111,60 +114,22 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         Returns:
             Transformed[AugmentedData]: Sample from the target distribution.
         """
-        if self.data is None:
-            raise NotImplementedError(
-                "Sampling without provided data is not implemented."
-            )
+        pos = self.data.pos[idx].reshape(-1, 4, 3)
+
+        chain = key_chain(key)
+        if self.aux_model is None:
+            aux = None
         else:
-            chain = key_chain(key)
-            idx = jax.random.randint(
-                next(chain), minval=0, maxval=len(self.data.pos), shape=()
-            )
-            # box = SimulationBox(self.data.box[idx])
-            pos = self.data.pos[idx].reshape(-1, 4, 3)
-            pos = boxify(pos, self.box)
+            aux = self.aux_model.sample(seed=next(chain))
 
-            if self.aux_model is None:
-                aux = None
-            else:
-                aux = self.aux_model.sample(seed=next(chain))
+        force = None
+        sign = jnp.sign(
+            jax.random.normal(next(chain), shape=(self.sys_specs.num_molecules, 1))
+        )
 
-            force = None
-            sign = jnp.sign(
-                jax.random.normal(
-                    next(chain), shape=(self.sys_specs.num_molecules, 1)
-                )
-            )
-
-            sample = DataWithAuxiliary(pos, aux, sign, self.box, force)
-            energy = self.potential(sample)
-            return Transformed(sample, energy)
-    
-    def sample_idx(self, key: KeyArray, idx: jnp.ndarray) -> Transformed[DataWithAuxiliary]:
-        if self.data is None:
-            raise NotImplementedError(
-                "Sampling without provided data is not implemented."
-            )
-        else:
-            pos = self.data.pos[idx].reshape(-1, 4, 3)
-            pos = boxify(pos, self.box)
-
-            chain = key_chain(key)
-            if self.aux_model is None:
-                aux = None
-            else:
-                aux = self.aux_model.sample(seed=next(chain))
-
-            force = None
-            sign = jnp.sign(
-                jax.random.normal(
-                    next(chain), shape=(self.sys_specs.num_molecules, 1)
-                )
-            )
-
-            sample = DataWithAuxiliary(pos, aux, sign, self.box, force)
-            energy = self.potential(sample)
-            return Transformed(sample, energy)
+        sample = DataWithAuxiliary(pos, aux, sign, self.box, force)
+        energy = self.potential(sample)
+        return Transformed(sample, energy)
 
     @staticmethod
     def from_specs(
@@ -180,9 +145,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             sys_specs.softcore_slope,
         )
 
-        box = SimulationBox(jnp.diag(omm_model.model.box))
-
-        data = Data.from_specs(sys_specs, box, selection)
+        data = Data.from_specs(sys_specs, omm_model, selection)
         if sys_specs.recompute_forces:
             data = data.recompute_forces(omm_model)
         elif sys_specs.forces_path:
@@ -192,10 +155,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             assert data.force is not None
             np.savez(sys_specs.forces_path, forces=np.array(data.force))
 
-        data = PreprocessedData.from_data(
-            data,
-            SimulationBox(jnp.diag(omm_model.model.box)),
-        )
+        data = PreprocessedData.from_data(data)
 
         if auxiliary_shape is None:
             aux_model = None
@@ -203,7 +163,6 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             aux_model = tfp.distributions.Normal(
                 jnp.zeros(auxiliary_shape), jnp.ones(auxiliary_shape)
             )
-
 
         return OpenMMDensity(
             sys_specs=sys_specs,

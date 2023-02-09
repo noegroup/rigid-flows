@@ -54,9 +54,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         results = {}
 
         if omm:
-            if self.sys_specs.fixed_box:
-                box = None
-            else:
+            if not self.sys_specs.fixed_box:
                 raise NotImplementedError()
 
             energy = partial(
@@ -66,7 +64,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             )
             results["omm"] = energy(inp.pos)
         if aux and self.aux_model is not None:
-            results["aux"] = 0  
+            results["aux"] = 0
             # -self.aux_model.log_prob(inp.aux).sum(
             # axis=(-2, -1)
             # )
@@ -90,9 +88,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             jnp.zeros(()),
         )
 
-    def sample(
-        self, key: KeyArray
-    ) -> Transformed[DataWithAuxiliary]:  # FIXME super slow!
+    def sample(self, key: KeyArray) -> Transformed[DataWithAuxiliary]:
         """Samples from the target (data) distribution."""
         idx = jax.random.randint(key, minval=0, maxval=len(self.data.pos), shape=())
         return self.sample_idx(key, idx)
@@ -128,6 +124,9 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         )
 
         sample = DataWithAuxiliary(pos, aux, sign, self.box, force)
+        # energy = self.data.energy[idx] / self.omm_model.kbT
+        # if self.aux_model is not None:
+        #     energy = energy + self.compute_energies(sample, omm=False, aux=True, has_batch_dim=False)["aux"]
         energy = self.potential(sample)
         return Transformed(sample, energy)
 

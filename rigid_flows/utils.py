@@ -202,11 +202,3 @@ def scanned_vmap(
         return out
 
     return wrapper
-
-
-def smooth_maximum(a, bins=100, sigma=100, window=100):
-    freqs, bins = jnp.histogram(a, bins=bins)
-    gx = np.arange(-4 * sigma, 4 * sigma, window)
-    gaussian = np.exp(-((gx / sigma) ** 2) / 2)
-    freqs = jnp.convolve(freqs, gaussian, mode="same")
-    return bins[jnp.argmax(freqs)]

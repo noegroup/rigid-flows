@@ -33,11 +33,28 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         omm_model: OpenMMEnergyModel,
         aux_model: tfp.distributions.Distribution | None,
         data: PreprocessedData,
+        stored_energies: bool = True,
     ):
         self.aux_model = aux_model
         self.sys_specs = sys_specs
         self.omm_model = omm_model
         self.data = data
+
+        if stored_energies:
+            self.omm_energies = self.compute_energies(
+                DataWithAuxiliary(self.data.pos, None, jnp.array([]), self.box, None),
+                omm=True,
+                aux=False,
+                has_batch_dim=True,
+            )["omm"]
+            if not jnp.allclose(
+                self.omm_energies, self.data.energy / self.omm_model.kbT, rtol=1e-4
+            ):
+                raise ValueError(
+                    "omm_model energies are inconsisten with the stored ones"
+                )
+        else:
+            self.omm_energies = None
 
     @property
     def box(self) -> SimulationBox:
@@ -124,10 +141,18 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         )
 
         sample = DataWithAuxiliary(pos, aux, sign, self.box, force)
-        # energy = self.data.energy[idx] / self.omm_model.kbT
-        # if self.aux_model is not None:
-        #     energy = energy + self.compute_energies(sample, omm=False, aux=True, has_batch_dim=False)["aux"]
-        energy = self.potential(sample)
+        if self.omm_energies is not None:
+            energy = self.omm_energies[idx]
+            if self.aux_model is not None:
+                energy = (
+                    energy
+                    + self.compute_energies(
+                        sample, omm=False, aux=True, has_batch_dim=False
+                    )["aux"]
+                )
+        else:
+            energy = self.potential(sample)
+
         return Transformed(sample, energy)
 
     @staticmethod

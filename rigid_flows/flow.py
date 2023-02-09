@@ -2,13 +2,12 @@ from dataclasses import asdict
 from functools import partial
 from typing import Any, cast
 
-import distrax
 import equinox
 import equinox as eqx
 import jax
 import lenses
 from flox import geom
-from flox._src.flow.impl import Affine, DistraxWrapper, Moebius
+from flox._src.flow.impl import Affine, Moebius
 from flox.flow import DoubleMoebius, Pipe, Transform, Transformed
 from flox.util import key_chain, unpack
 from jax import Array
@@ -17,7 +16,6 @@ from jax_dataclasses import pytree_dataclass
 from jaxtyping import Float
 
 from .data import DataWithAuxiliary
-from .density import OpenMMDensity
 from .nnextra import AuxConditioner, PosConditioner, RotConditioner
 from .rigid import Rigid
 from .specs import CouplingSpecification, FlowSpecification
@@ -229,7 +227,6 @@ class QuatUpdate(eqx.Module):
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...] | None,
-        # num_pos: int,
         num_blocks: int,
         seq_len: int,
         *,
@@ -250,16 +247,13 @@ class QuatUpdate(eqx.Module):
         """
         chain = key_chain(key)
 
-        # seq_len = 16
         num_out = 4
-        # num_aux = 3
         if auxiliary_shape is not None:
             num_aux = auxiliary_shape[-1]
         else:
             num_aux = None
         num_heads = 8
         num_channels = 32
-        # num_blocks = 2
         self.net = RotConditioner(
             seq_len,
             2 * num_out,
@@ -329,12 +323,7 @@ class AuxUpdate(eqx.Module):
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...],
-        num_pos: int,
-        num_dims: int,
-        num_low_rank: int,
         num_blocks: int,
-        low_rank_regularizer: float,
-        transform: str,
         seq_len: int,
         *,
         key: KeyArray,
@@ -352,12 +341,10 @@ class AuxUpdate(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         chain = key_chain(key)
-        # seq_len = 16
         num_aux = auxiliary_shape[-1]
         num_out = 2 * num_aux
         num_heads = 8
         num_channels = 32
-        # num_blocks = 2
         self.net = AuxConditioner(
             seq_len,
             2 * num_out,
@@ -407,7 +394,6 @@ class AuxUpdate(eqx.Module):
 class PosUpdate(eqx.Module):
 
     net: PosConditioner
-    # num_bins: int
 
     def __init__(
         self,
@@ -421,20 +407,16 @@ class PosUpdate(eqx.Module):
         **kwargs,
     ):
         chain = key_chain(key)
-        # seq_len = 16
 
-        # self.num_bins = 64
 
         # num_aux = 3
         if auxiliary_shape is None:
             num_aux = None
         else:
             num_aux = auxiliary_shape[-1]
-        # num_out = 3 * (3 * self.num_bins + 1)
-        num_out = num_pos * 2
+        num_out = num_pos * 2 #TODO try with different number of blocks
         num_heads = 8
         num_channels = 32
-        # num_blocks = 2
 
         self.net = PosConditioner(
             seq_len,
@@ -612,8 +594,6 @@ def build_flow(
     key: KeyArray,
     auxiliary_shape: tuple[int, ...] | None,
     specs: FlowSpecification,
-    # base: OpenMMDensity,
-    # target: OpenMMDensity,
 ) -> Pipe[DataWithAuxiliary, DataWithAuxiliary]:
     """Creates the final flow composed of:
 

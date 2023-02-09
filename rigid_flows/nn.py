@@ -1,15 +1,11 @@
-from functools import partial
 from itertools import accumulate
 from math import sqrt
-from turtle import forward
 
 import equinox as eqx
 import jax
-from equinox.filters import is_array
 from jax import numpy as jnp
 from jaxtyping import Array, Float
 
-from flox._src import geom
 from flox.util import key_chain
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray

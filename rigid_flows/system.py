@@ -116,7 +116,9 @@ class OpenMMEnergyModel:
                     )
                 case _:
                     raise ValueError(f"unkown cutoff type: '{type}'")
-        self.model.set_customLJ(expr, self.context) #will complain if trying to set a cutoff to a non "customLJ" water
+        self.model.set_customLJ(
+            expr, self.context
+        )  # will complain if trying to set a cutoff to a non "customLJ" water
 
     def set_box(self, box: SimulationBox):
         box_vectors = np.diag(np.array(box.size))
@@ -128,6 +130,8 @@ class OpenMMEnergyModel:
         box: np.ndarray | None,
         error_handling: ErrorHandling | None = None,
     ):
+        pos = pos.reshape(-1, self.model.n_atoms, 3)
+
         energies = np.empty(pos.shape[0], dtype=np.float32)
         forces = np.empty_like(pos, dtype=np.float32)
 
@@ -138,12 +142,9 @@ class OpenMMEnergyModel:
             assert box.shape == (3, 3), f"box.shape = {box.shape}"
             self.context.setPeriodicBoxVectors(*box)
 
-        pos = pos.reshape(pos.shape[0], -1, 3)
-
-        mask = np.ones_like(pos[0])
-        mask = mask.reshape(-1, 4, 3)
-        mask[:, -1, :] = 0
-        mask = mask.reshape(pos[0].shape)
+        mask = np.ones((self.model.n_waters, self.model.n_sites, 3))
+        mask[:, 3:, :] = 0  # anything beyond 3 is a virtual site
+        mask = mask.reshape((self.model.n_atoms, 3))
 
         # iterate over batch dimension
         for i in range(len(pos)):
@@ -153,13 +154,11 @@ class OpenMMEnergyModel:
 
             try:
                 self.context.setPositions(pos[i])
-                self.context.computeVirtualSites()
+                self.context.computeVirtualSites()  # make sure virtual sites are correct
 
                 state = self.context.getState(getEnergy=True, getForces=True)
                 energy = (
-                    state.getPotentialEnergy().value_in_unit(
-                        unit.kilojoule_per_mole
-                    )
+                    state.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
                     / self.kbT
                 )
                 force = (
@@ -178,7 +177,7 @@ class OpenMMEnergyModel:
                         pass
             finally:
                 energies[i] = energy
-                forces[i] = force * mask
+                forces[i] = force * mask  # set force on virtual sites to zero
 
         return energies, forces
 
@@ -191,9 +190,7 @@ class OpenMMEnergyModel:
 
 
 def wrap_openmm_model(model: OpenMMEnergyModel):
-    def compute_energy_and_forces(
-        pos: Array, box: Array | None, has_batch_dim: bool
-    ):
+    def compute_energy_and_forces(pos: Array, box: Array | None, has_batch_dim: bool):
 
         if box is not None:
             assert box.shape == (3,)
@@ -249,9 +246,7 @@ def lennard_jones(r, sigma, epsilon):
     return 4 * epsilon * ((sigma / r) ** 12 - (sigma / r) ** 6)
 
 
-def parse_jaxpr(
-    fn: Callable, args: tuple[str] | None = None, symbols: dict = {}
-):
+def parse_jaxpr(fn: Callable, args: tuple[str] | None = None, symbols: dict = {}):
 
     placeholders = []
     defaults = []
@@ -264,9 +259,7 @@ def parse_jaxpr(
             else:
                 placeholders.append(key)
 
-    jaxpr_kwargs = [
-        jax.ShapedArray((), dtype=jnp.float32) for _ in placeholders
-    ]
+    jaxpr_kwargs = [jax.ShapedArray((), dtype=jnp.float32) for _ in placeholders]
     jaxpr = jax.make_jaxpr(fn)(*jaxpr_kwargs)
     symbols = {
         str(sym): key if key not in symbols else symbols[key]

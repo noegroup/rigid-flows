@@ -9,16 +9,15 @@ import jax
 import lenses
 import optax
 import tensorflow as tf  # type: ignore
+from flox._src.flow.potential import Potential, PushforwardPotential
+from flox._src.flow.sampling import PushforwardSampler, Sampler
+from flox.flow import PullbackSampler, Transform
+from flox.util import key_chain
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 from optax import GradientTransformation, OptState
 from tqdm import tqdm
-
-from flox._src.flow.potential import Potential, PushforwardPotential
-from flox._src.flow.sampling import PushforwardSampler, Sampler
-from flox.flow import PullbackSampler, Transform
-from flox.util import key_chain
 
 from .data import DataWithAuxiliary
 from .density import DensityModel, OpenMMDensity
@@ -79,26 +78,20 @@ def force_matching_loss_fn(
     if perturbation_noise > 0:
         samples = lenses.bind(samples).pos.set(
             samples.pos
-            + perturbation_noise
-            * jax.random.normal(next(chain), samples.pos.shape)
+            + perturbation_noise * jax.random.normal(next(chain), samples.pos.shape)
         )
-    _, omm_forces = wrap_openmm_model(omm_energy_model)[1](
-        samples.pos, None, True
-    )
+    _, omm_forces = wrap_openmm_model(omm_energy_model)[1](samples.pos, None, True)
 
     num_atoms = prod(samples.pos.shape[1:])
     if ignore_charge_site:
+        assert omm_energy_model.model.n_sites == 4
         mask = (jnp.arange(num_atoms) % 4) != 3
         mask = jnp.tile(mask[None], (num_samples, 1))
     else:
         mask = jnp.ones((num_samples, num_atoms))
 
-    def evaluate(
-        flow: Transform[DataWithAuxiliary, DataWithAuxiliary]
-    ) -> Array:
-        flow_grads = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(
-            samples
-        )
+    def evaluate(flow: Transform[DataWithAuxiliary, DataWithAuxiliary]) -> Array:
+        flow_grads = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(samples)
         mse = 0
         mse += jnp.mean(
             jnp.square(
@@ -124,9 +117,7 @@ def kullback_leiber_divergence_fn(
 ) -> LossFun:
     keys = jax.random.split(key, num_samples)
 
-    def evaluate(
-        flow: Transform[DataWithAuxiliary, DataWithAuxiliary]
-    ) -> Array:
+    def evaluate(flow: Transform[DataWithAuxiliary, DataWithAuxiliary]) -> Array:
         if reverse:
             out = jax.vmap(PushforwardSampler(base.sample, flow))(keys)
             return jnp.mean(jax.vmap(target.potential)(out.obj) - out.ldj)
@@ -149,9 +140,7 @@ def var_grad_loss_fn(
 
     samples = jax.lax.stop_gradient(jax.vmap(sampler)(keys).obj)
 
-    def evaluate(
-        flow: Transform[DataWithAuxiliary, DataWithAuxiliary]
-    ) -> Array:
+    def evaluate(flow: Transform[DataWithAuxiliary, DataWithAuxiliary]) -> Array:
         flow_energies = jax.vmap(PushforwardPotential(base, flow))(samples)
         target_energies = jax.vmap(target)(samples)
         return jnp.var(flow_energies - target_energies)
@@ -189,16 +178,12 @@ def update_fn(
         flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
         opt_state: OptState,
     ):
-        (loss, report), grad = eqx.filter_value_and_grad(loss_fn, has_aux=True)(
-            flow
-        )
+        (loss, report), grad = eqx.filter_value_and_grad(loss_fn, has_aux=True)(flow)
 
         grad = (
             lenses.bind(grad)
             .Recur(EuclideanToRigidTransform)
-            .modify(
-                lambda node: jax.tree_map(lambda x: jnp.zeros_like(x), node)
-            )
+            .modify(lambda node: jax.tree_map(lambda x: jnp.zeros_like(x), node))
         )
 
         updates, opt_state = optim.update(grad, opt_state)  # type: ignore
@@ -362,13 +347,9 @@ def run_training_stage(
             )
 
             for _ in pbar:
-                loss, flow, opt_state, report = step(
-                    next(chain), flow, opt_state
-                )
+                loss, flow, opt_state, report = step(next(chain), flow, opt_state)
                 pbar.set_postfix({"loss": loss})
-                tf.summary.scalar(
-                    f"loss/total/{reporter.scope}", loss, tot_iter
-                )
+                tf.summary.scalar(f"loss/total/{reporter.scope}", loss, tot_iter)
                 if loss_reporter is not None:
                     loss_reporter.append(loss.item())
                 for name, val in report.items():

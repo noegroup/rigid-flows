@@ -142,9 +142,7 @@ class OpenMMEnergyModel:
             assert box.shape == (3, 3), f"box.shape = {box.shape}"
             self.context.setPeriodicBoxVectors(*box)
 
-        mask = np.ones((self.model.n_waters, self.model.n_sites, 3))
-        mask[:, 3:, :] = 0  # anything beyond 3 is a virtual site
-        mask = mask.reshape((self.model.n_atoms, 3))
+        assert self.model.vs_mask.shape == (self.model.n_atoms, 3)
 
         # iterate over batch dimension
         for i in range(len(pos)):
@@ -177,7 +175,9 @@ class OpenMMEnergyModel:
                         pass
             finally:
                 energies[i] = energy
-                forces[i] = force * mask  # set force on virtual sites to zero
+                forces[i] = (
+                    force * self.model.vs_mask
+                )  # set force on virtual sites to zero
 
         return energies, forces
 
@@ -197,11 +197,11 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
             box = jnp.diag(box)
 
         if not has_batch_dim:
-            assert pos.shape == (model.model.n_waters, model.model.n_sites, 3)
+            assert pos.shape == (model.model.n_molecules, model.model.n_sites, 3)
             pos = jnp.expand_dims(pos, axis=0)
         else:
             assert pos.shape[1:] == (
-                model.model.n_waters,
+                model.model.n_molecules,
                 model.model.n_sites,
                 3,
             )

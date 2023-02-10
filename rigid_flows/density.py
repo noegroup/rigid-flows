@@ -111,7 +111,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         return self.sample_idx(key, idx)
 
     def sample_idx(
-        self, key: KeyArray, idx: jnp.ndarray
+        self, key: KeyArray, idx: int
     ) -> Transformed[DataWithAuxiliary]:
         """Samples from the target (data) distribution.
 
@@ -127,7 +127,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         Returns:
             Transformed[AugmentedData]: Sample from the target distribution.
         """
-        pos = self.data.pos[idx].reshape(-1, 4, 3)
+        pos = self.data.pos[idx].reshape(-1, self.omm_model.model.n_sites, 3)
 
         chain = key_chain(key)
         if self.aux_model is None:

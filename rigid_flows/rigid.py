@@ -1,28 +1,22 @@
 import jax
 import jax.numpy as jnp
-from jax_dataclasses import pytree_dataclass
-
 from flox import geom
+from jax_dataclasses import pytree_dataclass
 
 
 @pytree_dataclass(frozen=True)
 class InternalCoordinates:
-    # see https://github.com/openmm/openmm/blob/master/wrappers/python/openmm/app/data/tip4pew.xml
-    d_OH1: jnp.ndarray = jnp.array(0.09572)
-    d_OH2: jnp.ndarray = jnp.array(0.09572)
-    a_HOH: jnp.ndarray = jnp.array(1.8242182)
+    d_OH1: jnp.ndarray  # = jnp.array(0.09572)
+    d_OH2: jnp.ndarray  # = jnp.array(0.09572)
+    a_HOH: jnp.ndarray  # = jnp.array(1.82421813418)
 
     def asarray(self):
         return jnp.array(
             [
                 jnp.array([0.0, 0.0, 0.0]),
-                jnp.array(
-                    [jnp.sin(-self.a_HOH / 2), 0.0, jnp.cos(-self.a_HOH / 2)]
-                )
+                jnp.array([jnp.sin(-self.a_HOH / 2), 0.0, jnp.cos(-self.a_HOH / 2)])
                 * self.d_OH1,
-                jnp.array(
-                    [jnp.sin(+self.a_HOH / 2), 0.0, jnp.cos(+self.a_HOH / 2)]
-                )
+                jnp.array([jnp.sin(+self.a_HOH / 2), 0.0, jnp.cos(+self.a_HOH / 2)])
                 * self.d_OH2,
             ]
         )

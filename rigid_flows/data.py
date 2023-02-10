@@ -57,7 +57,7 @@ class Data:
 
         data = Data(
             pos=raw["pos"][selection].reshape(
-                -1, omm_model.model.n_waters, omm_model.model.n_sites, 3
+                -1, omm_model.model.n_molecules, omm_model.model.n_sites, 3
             ),
             box=jax.vmap(jnp.diag)(raw["box"][selection]),
             energy=raw["ene"][selection],

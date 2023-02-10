@@ -29,9 +29,10 @@ Vector3 = Float[Array, "... 3"]
 Quaternion = Float[Array, "... 4"]
 Auxiliary = Float[Array, f"... AUX"]
 
-Atoms = Float[Array, "... MOL 4 3"]
+Atoms = Float[Array, "... MOL SITES 3"]
 
 MOEBIUS_SLACK = 0.95
+
 
 class RigidTransform(Transform[Atoms, Rigid]):
     def forward(self, inp: Atoms) -> Transformed[Rigid]:
@@ -87,9 +88,7 @@ def toggle_layer_stack(flow: Transform, toggle: bool) -> Transform:
         return LayerStackedPipe(flow.transforms, use_scan=toggle)
     elif isinstance(flow, Pipe):
         return Pipe(
-            tuple(
-                map(partial(toggle_layer_stack, toggle=toggle), flow.transforms)
-            )
+            tuple(map(partial(toggle_layer_stack, toggle=toggle), flow.transforms))
         )
     else:
         return flow
@@ -286,9 +285,7 @@ class QuatUpdate(eqx.Module):
 
         return reflection
 
-    def forward(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def forward(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
         reflection = self.params(input)
 
@@ -300,9 +297,7 @@ class QuatUpdate(eqx.Module):
         ldj = jnp.sum(ldj)
         return Transformed(output, ldj)
 
-    def inverse(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def inverse(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
         reflection = self.params(input)
 
@@ -363,27 +358,21 @@ class AuxUpdate(eqx.Module):
         Returns:
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
-        out = self.net(input.rigid.pos, input.rigid.rot).reshape(
-            input.aux.shape[0], -1
-        )
+        out = self.net(input.rigid.pos, input.rigid.rot).reshape(input.aux.shape[0], -1)
         out, gate = jnp.split(out, 2, axis=-1)
         out = out * jax.nn.sigmoid(gate - 3.0)
 
         shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
         return shift, scale
 
-    def forward(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def forward(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
         shift, scale = self.params(input)
         pipe = Affine(shift, scale)
         aux, ldj = unpack(pipe.forward(input.aux))
         return Transformed(lenses.bind(input).aux.set(aux), ldj)
 
-    def inverse(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def inverse(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
         shift, scale = self.params(input)
         pipe = Affine(shift, scale)
@@ -408,13 +397,12 @@ class PosUpdate(eqx.Module):
     ):
         chain = key_chain(key)
 
-
         # num_aux = 3
         if auxiliary_shape is None:
             num_aux = None
         else:
             num_aux = auxiliary_shape[-1]
-        num_out = num_pos * 2 #TODO try with different number of blocks
+        num_out = num_pos * 2  # TODO try with different number of blocks
         num_heads = 8
         num_channels = 32
 
@@ -454,9 +442,7 @@ class PosUpdate(eqx.Module):
             axis=-1,
         )
         pos, ldj = unpack(
-            jax.vmap(jax.vmap(lambda ref, pos: Moebius(ref).forward(pos)))(
-                params, pos
-            )
+            jax.vmap(jax.vmap(lambda ref, pos: Moebius(ref).forward(pos)))(params, pos)
         )
         pos = jnp.arctan2(pos[..., 1], pos[..., 0])
         pos = (pos + jnp.pi) / (2 * jnp.pi)
@@ -482,9 +468,7 @@ class PosUpdate(eqx.Module):
             axis=-1,
         )
         pos, ldj = unpack(
-            jax.vmap(jax.vmap(lambda ref, pos: Moebius(ref).inverse(pos)))(
-                params, pos
-            )
+            jax.vmap(jax.vmap(lambda ref, pos: Moebius(ref).inverse(pos)))(params, pos)
         )
         pos = jnp.arctan2(pos[..., 1], pos[..., 0])
         pos = (pos + jnp.pi) / (2 * jnp.pi)
@@ -497,9 +481,7 @@ class PosUpdate(eqx.Module):
 
 
 class EuclideanToRigidTransform(equinox.Module):
-    def forward(
-        self, input: DataWithAuxiliary
-    ) -> Transformed[RigidWithAuxiliary]:
+    def forward(self, input: DataWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         transform = RigidTransform()
         rigid, _ = unpack(jax.vmap(transform.forward)(input.pos))
         ldj = jnp.zeros(())
@@ -508,9 +490,7 @@ class EuclideanToRigidTransform(equinox.Module):
             ldj,
         )
 
-    def inverse(
-        self, input: RigidWithAuxiliary
-    ) -> Transformed[DataWithAuxiliary]:
+    def inverse(self, input: RigidWithAuxiliary) -> Transformed[DataWithAuxiliary]:
         transform = RigidTransform()
         pos, _ = unpack(jax.vmap(transform.inverse)(input.rigid))
         ldj = jnp.zeros(())
@@ -542,7 +522,7 @@ def _coupling(
     chain = key_chain(key)
     blocks = []
     for _ in range(specs.num_repetitions):
-        if False: #auxiliary_shape is not None:
+        if False:  # auxiliary_shape is not None:
             aux_block = [
                 AuxUpdate(
                     auxiliary_shape=auxiliary_shape,
@@ -563,7 +543,7 @@ def _coupling(
             if auxiliary_shape is not None:
                 aux_block += [ActNorm(lenses.lens.aux)]
 
-        if False: #auxiliary_shape is not None:
+        if False:  # auxiliary_shape is not None:
             sub_block = Pipe(
                 [
                     *aux_block,

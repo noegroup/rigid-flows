@@ -12,16 +12,15 @@ import jax
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf  # type: ignore
+from flox._src.flow.api import Inverted, Transform, Transformed, bind
+from flox._src.flow.sampling import Sampler
+from flox._src.util.jax import key_chain
+from flox._src.util.misc import unpack
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
-
-from flox._src.flow.api import Inverted, Transform, Transformed, bind
-from flox._src.flow.sampling import Sampler
-from flox._src.util.jax import key_chain
-from flox._src.util.misc import unpack
 
 from .data import DataWithAuxiliary
 from .density import KeyArray, OpenMMDensity

@@ -51,9 +51,14 @@ class WaterModel:
         assert (
             len(positions) % n_sites == 0
         ), "mismatch between number of atoms per molecule and total number of atoms"
-        n_waters = len(positions) // n_sites
+        n_molecules = len(positions) // n_sites
 
-        mdtraj_topology = self.generate_mdtraj_topology(n_waters, n_sites)
+        # mask to remove virtual sites
+        vs_mask = np.ones((n_molecules, n_sites, 3))
+        vs_mask[:, 3:, :] = 0  # anything beyond 3 is a virtual site
+        vs_mask = vs_mask.reshape((n_molecules * n_sites, 3))
+
+        mdtraj_topology = self.generate_mdtraj_topology(n_molecules, n_sites)
         topology = mdtraj_topology.to_openmm()
         topology.setPeriodicBoxVectors(box)
 
@@ -68,6 +73,7 @@ class WaterModel:
         ff_filename = water_type.removesuffix("-customLJ") + ".xml"
         if "tip4pice" in water_type:
             import os
+
             ff_filename = f"{os.path.dirname(__file__)}/{ff_filename}"
         ff = openmm.app.ForceField(ff_filename)
         system = ff.createSystem(
@@ -129,9 +135,11 @@ class WaterModel:
         self._box = np.array(box)
         self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diag(box)))
 
-        self.n_waters = n_waters
+        self.n_molecules = n_molecules
         self.n_sites = n_sites
-        self.n_atoms = n_waters * n_sites
+        self.n_atoms = n_molecules * n_sites
+        self.vs_mask = vs_mask
+
         self.water_type = water_type
         self.nonbondedCutoff = nonbondedCutoff
         self.rigidWater = rigidWater
@@ -156,14 +164,14 @@ class WaterModel:
         self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diag(box)))
 
     @staticmethod
-    def generate_mdtraj_topology(n_waters, n_sites=4):
+    def generate_mdtraj_topology(n_molecules, n_sites=4):
         assert n_sites >= 3, "only 3 or more sites are supported"
         H = md.element.Element.getBySymbol("H")
         O = md.element.Element.getBySymbol("O")
         VS = md.element.Element.getBySymbol("VS")
         water_top = md.Topology()
         water_top.add_chain()
-        for i in range(n_waters):
+        for i in range(n_molecules):
             water_top.add_residue("HOH", water_top.chain(0))
             water_top.add_atom("O", O, water_top.residue(i))
             water_top.add_atom("H1", H, water_top.residue(i))
@@ -467,7 +475,7 @@ class WaterModel:
         else:
             mask_vs = np.tile(
                 np.concatenate((3 * [True], (self.n_sites - 3) * [False])),
-                self.n_waters,
+                self.n_molecules,
             )
             if pos is None:
                 pos = self._positions[None]
@@ -477,7 +485,7 @@ class WaterModel:
                 self.get_mdtraj(
                     pos[:, mask_vs],
                     box,
-                    self.generate_mdtraj_topology(self.n_waters, 3),
+                    self.generate_mdtraj_topology(self.n_molecules, 3),
                 )
             )
         view.add_representation("ball+stick", selection="water")

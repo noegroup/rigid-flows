@@ -370,48 +370,29 @@ def _coupling(
     blocks = []
     for _ in range(specs.num_repetitions):
         if use_auxiliary:
-            aux_block = [
+            blocks.append(
                 AuxUpdate(
                     seq_len=num_molecules,
                     **asdict(specs.auxiliary_update),
                     key=next(chain),
                 )
-            ]
-        pos_block = [
+            )
+        blocks.append(
             PosUpdate(
                 seq_len=num_molecules,
                 use_auxiliary=use_auxiliary,
                 **asdict(specs.position_update),
                 key=next(chain),
-            ),
-        ]
-
-        if use_auxiliary:
-            sub_block = Pipe(
-                [
-                    *aux_block,
-                    *pos_block,
-                    QuatUpdate(
-                        seq_len=num_molecules,
-                        use_auxiliary=use_auxiliary,
-                        **asdict(specs.quaternion_update),
-                        key=next(chain),
-                    ),
-                ]
             )
-        else:
-            sub_block = Pipe(
-                [
-                    *pos_block,
-                    QuatUpdate(
-                        seq_len=num_molecules,
-                        use_auxiliary=use_auxiliary,
-                        **asdict(specs.quaternion_update),
-                        key=next(chain),
-                    ),
-                ]
+        )
+        blocks.append(
+            QuatUpdate(
+                seq_len=num_molecules,
+                use_auxiliary=use_auxiliary,
+                **asdict(specs.quaternion_update),
+                key=next(chain),
             )
-        blocks.append(sub_block)
+        )
     return Pipe(blocks)
 
 
@@ -440,7 +421,6 @@ def build_flow(
         blocks.append(_coupling(next(chain), num_molecules, use_auxiliary, coupling))
 
     couplings = LayerStackedPipe(blocks, use_scan=True)
-    # couplines = Pipe(blocks)
     return Pipe(
         [
             EuclideanToRigidTransform(),

@@ -20,10 +20,7 @@ model:
   # set if model is trained with warm start
   pretrained_model_path: null # runs/2022-12-13_19:18:20/training_stage_0/epoch_1/model.eqx 
 
-  # num_molecules: 16 #TODO it would be nice if we could specify the sistem size only in one place
-  
-  # shape of the auxiliary variables
-  auxiliary_shape: [16, 3]
+  use_auxiliary: true
 
   # definition of the flow model
   flow:
@@ -31,14 +28,17 @@ model:
     couplings:
       - num_repetitions: 4
         auxiliary_update:
-          seq_len: 16
           num_blocks: 2
+          num_heads: 8
+          num_channels: 32
         position_update:
-          seq_len: 16
           num_blocks: 2
+          num_heads: 8
+          num_channels: 32
         quaternion_update:
-          seq_len: 16
           num_blocks: 2
+          num_heads: 8
+          num_channels: 32
       
   base:
     path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"

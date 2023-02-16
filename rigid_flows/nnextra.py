@@ -232,7 +232,6 @@ class RotationConditionerBlock(eqx.Module):
         num_aux: int | None,
         num_heads: int,
         num_channels: int,
-        *,
         key
     ) -> None:
         chain = key_chain(key)
@@ -307,7 +306,7 @@ class RotConditioner(eqx.Module):
     decoder: eqx.nn.Sequential
 
     def __init__(
-        self, inp, out, num_aux, num_heads, num_channels, num_blocks, *, key
+        self, inp, out, num_aux, num_heads, num_channels, num_blocks, key
     ) -> None:
         chain = key_chain(key)
         self.blocks = [

@@ -11,7 +11,7 @@ from jax import Array
 
 from .data import Data, DataWithAuxiliary, PreprocessedData
 from .specs import SystemSpecification
-from .system import OpenMMEnergyModel, SimulationBox, wrap_openmm_model
+from .system import OpenMMEnergyModel, SimulationBox, wrap_openmm_model, SPATIAL_DIM
 
 T = TypeVar("T")
 
@@ -152,7 +152,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
     @staticmethod
     def from_specs(
-        auxiliary_shape: tuple[int, ...] | None,
+        use_auxiliary: bool,
         sys_specs: SystemSpecification,
         selection: slice = np.s_[:],
     ):
@@ -176,12 +176,13 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
         data = PreprocessedData.from_data(data)
 
-        if auxiliary_shape is None:
-            aux_model = None
-        else:
+        if use_auxiliary:
+            auxiliary_shape = [omm_model.model.n_molecules, SPATIAL_DIM]
             aux_model = tfp.distributions.Normal(
                 jnp.zeros(auxiliary_shape), jnp.ones(auxiliary_shape)
             )
+        else:
+            aux_model = None
 
         return OpenMMDensity(
             sys_specs=sys_specs,

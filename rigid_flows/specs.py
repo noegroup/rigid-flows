@@ -19,56 +19,23 @@ class ReportingSpecifications:
 
 
 @pytree_dataclass(frozen=True)
-class PosEncoderSpecification:
-    seq_len: int
-    activation: str
-    num_pos: int
-    expansion_factor: int
+class NodeUpdateSpecification:
     num_blocks: int
-
-
-@pytree_dataclass(frozen=True)
-class PosAndAuxUpdateSpecification:
-    seq_len: int
-    # activation: str
-    # num_dims: int
-    # num_pos: int
-    # expansion_factor: int
-    num_blocks: int
-    # transform: str
-    # num_low_rank: int
-    # low_rank_regularizer: float
-
-
-@pytree_dataclass(frozen=True)
-class QuatUpdateSpecification:
-    seq_len: int
-    # activation: str
-    # expansion_factor: int
-    num_blocks: int
+    num_heads: int
+    num_channels: int
 
 
 @pytree_dataclass(frozen=True)
 class CouplingSpecification:
     num_repetitions: int
-    auxiliary_update: PosAndAuxUpdateSpecification
-    position_update: PosAndAuxUpdateSpecification
-    quaternion_update: QuatUpdateSpecification
+    auxiliary_update: NodeUpdateSpecification
+    position_update: NodeUpdateSpecification
+    quaternion_update: NodeUpdateSpecification
+
 
 @pytree_dataclass(frozen=True)
 class FlowSpecification:
     couplings: tuple[CouplingSpecification, ...]
-
-
-@pytree_dataclass(frozen=True)
-class TargetSpecification:
-    cutoff_threshold: float | None
-
-
-@pytree_dataclass(frozen=True)
-class BaseSpecification:
-    rot_concentration: float
-    pos_concentration: float
 
 
 @pytree_dataclass(frozen=True)
@@ -126,8 +93,7 @@ class SystemSpecification:
 
 @pytree_dataclass(frozen=True)
 class ModelSpecification:
-    # num_molecules: int
-    auxiliary_shape: tuple[int, ...] | None
+    use_auxiliary: bool
     flow: FlowSpecification
     base: SystemSpecification
     target: SystemSpecification

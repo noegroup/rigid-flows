@@ -102,30 +102,21 @@ class QuatUpdate(eqx.Module):
 
     def __init__(
         self,
-        auxiliary_shape: tuple[int, ...] | None,
-        num_blocks: int,
+        use_auxiliary: bool,
         seq_len: int,
+        num_blocks: int,
+        num_heads: int,
+        num_channels: int,
         key: KeyArray,
     ):
-        """Flow layer updating the quaternion part of a state.
-
-        Args:
-            auxiliary_shape (tuple[int, ...]): shape of auxilaries
-            num_heads (int, optional): number of transformer heads. Defaults to 4.
-            num_dims (int, optional): node dimension within the transformer stack. Defaults to 64.
-            num_hidden (int, optional): hidden dim of transformer. Defaults to 64.
-            num_blocks (int, optional): number of transformer blocks. Defaults to 1.
-            key (KeyArray): PRNGKey for param initialization
-        """
+        """Flow layer updating the quaternion part of a state."""
         chain = key_chain(key)
 
         num_out = QUATERNION_DIM
-        if auxiliary_shape is not None:
+        if use_auxiliary:
             num_aux = SPATIAL_DIM
         else:
             num_aux = None
-        num_heads = 8
-        num_channels = 32
         self.net = RotConditioner(
             seq_len,
             2 * num_out,
@@ -190,27 +181,16 @@ class AuxUpdate(eqx.Module):
 
     def __init__(
         self,
-        auxiliary_shape: tuple[int, ...],
-        num_blocks: int,
         seq_len: int,
+        num_blocks: int,
+        num_heads: int,
+        num_channels: int,
         key: KeyArray,
     ):
-        """Flow layer updating the auxiliary part of a state.
-
-        Args:
-            auxiliary_shape (tuple[int, ...]): shape of auxilaries
-            num_pos (int, optional): number of position DoF. Defaults to 3.
-            num_heads (int, optional): number of transformer heads. Defaults to 4.
-            num_dims (int, optional): node dimension within the transformer stack. Defaults to 64.
-            num_hidden (int, optional): hidden dim of transformer. Defaults to 64.
-            num_blocks (int, optional): number of transformer blocks. Defaults to 1.
-            key (KeyArray): PRNGKey for param initialization
-        """
+        """Flow layer updating the auxiliary part of a state."""
         chain = key_chain(key)
         num_aux = SPATIAL_DIM
         num_out = 2 * num_aux
-        num_heads = 8
-        num_channels = 32
         self.net = AuxConditioner(
             seq_len,
             2 * num_out,
@@ -257,20 +237,20 @@ class PosUpdate(eqx.Module):
 
     def __init__(
         self,
-        auxiliary_shape: tuple[int, ...] | None,
-        num_blocks: int,
+        use_auxiliary: bool,
         seq_len: int,
+        num_blocks: int,
+        num_heads: int,
+        num_channels: int,
         key: KeyArray,
     ):
         chain = key_chain(key)
 
-        if auxiliary_shape is None:
-            num_aux = None
-        else:
+        if use_auxiliary:
             num_aux = SPATIAL_DIM
+        else:
+            num_aux = None
         num_out = SPATIAL_DIM * 2  # 2 due to encoding
-        num_heads = 8
-        num_channels = 32
 
         self.net = PosConditioner(
             seq_len,
@@ -369,7 +349,8 @@ class EuclideanToRigidTransform(equinox.Module):
 
 def _coupling(
     key: KeyArray,
-    auxiliary_shape: tuple[int, ...] | None,
+    num_molecules: int,
+    use_auxiliary: bool,
     specs: CouplingSpecification,
 ) -> Transform[RigidWithAuxiliary, RigidWithAuxiliary]:
     """Creates a coupling block consisting of:
@@ -388,29 +369,31 @@ def _coupling(
     chain = key_chain(key)
     blocks = []
     for _ in range(specs.num_repetitions):
-        if auxiliary_shape is not None:
+        if use_auxiliary:
             aux_block = [
                 AuxUpdate(
-                    auxiliary_shape=auxiliary_shape,
+                    seq_len=num_molecules,
                     **asdict(specs.auxiliary_update),
                     key=next(chain),
                 )
             ]
         pos_block = [
             PosUpdate(
-                auxiliary_shape=auxiliary_shape,
+                seq_len=num_molecules,
+                use_auxiliary=use_auxiliary,
                 **asdict(specs.position_update),
                 key=next(chain),
             ),
         ]
 
-        if auxiliary_shape is not None:
+        if use_auxiliary:
             sub_block = Pipe(
                 [
                     *aux_block,
                     *pos_block,
                     QuatUpdate(
-                        auxiliary_shape=auxiliary_shape,
+                        seq_len=num_molecules,
+                        use_auxiliary=use_auxiliary,
                         **asdict(specs.quaternion_update),
                         key=next(chain),
                     ),
@@ -421,7 +404,8 @@ def _coupling(
                 [
                     *pos_block,
                     QuatUpdate(
-                        auxiliary_shape=auxiliary_shape,
+                        seq_len=num_molecules,
+                        use_auxiliary=use_auxiliary,
                         **asdict(specs.quaternion_update),
                         key=next(chain),
                     ),
@@ -433,7 +417,8 @@ def _coupling(
 
 def build_flow(
     key: KeyArray,
-    auxiliary_shape: tuple[int, ...] | None,
+    num_molecules: int,
+    use_auxiliary: bool,
     specs: FlowSpecification,
 ) -> Pipe[DataWithAuxiliary, DataWithAuxiliary]:
     """Creates the final flow composed of:
@@ -452,7 +437,7 @@ def build_flow(
     chain = key_chain(key)
     blocks = []
     for coupling in specs.couplings:
-        blocks.append(_coupling(next(chain), auxiliary_shape, coupling))
+        blocks.append(_coupling(next(chain), num_molecules, use_auxiliary, coupling))
 
     couplings = LayerStackedPipe(blocks, use_scan=True)
     # couplines = Pipe(blocks)

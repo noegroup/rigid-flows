@@ -47,7 +47,7 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
     else:
         selection = np.s_[:]
     base = OpenMMDensity.from_specs(
-        specs.model.auxiliary_shape, specs.model.base, selection
+        specs.model.use_auxiliary, specs.model.base, selection
     )
 
     logging.info(f"Loading target density.")
@@ -58,13 +58,14 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
     else:
         selection = np.s_[:]
     target = OpenMMDensity.from_specs(
-        specs.model.auxiliary_shape, specs.model.target, selection
+        specs.model.use_auxiliary, specs.model.target, selection
     )
 
     logging.info(f"Setting up flow model.")
     flow = build_flow(
         next(chain),
-        specs.model.auxiliary_shape,
+        specs.model.base.num_molecules,
+        specs.model.use_auxiliary,
         specs.model.flow,
     )
 

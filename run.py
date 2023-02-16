@@ -16,12 +16,7 @@ from flox.util import key_chain
 
 from rigid_flows.data import DataWithAuxiliary
 from rigid_flows.density import KeyArray, OpenMMDensity
-from rigid_flows.flow import (
-    RigidWithAuxiliary,
-    build_flow,
-    initialize_actnorm,
-    toggle_layer_stack,
-)
+from rigid_flows.flow import RigidWithAuxiliary, build_flow
 from rigid_flows.reporting import Reporter, pretty_json
 from rigid_flows.specs import ExperimentSpecification
 from rigid_flows.train import run_training_stage
@@ -72,21 +67,6 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
         specs.model.auxiliary_shape,
         specs.model.flow,
     )
-
-    if specs.act_norm_init_samples is not None:
-        logging.info(f"Initializing ActNorm")
-
-        @eqx.filter_jit
-        def init_actnorm(flow, key):
-            actnorm_batch = jax.vmap(target.sample)(
-                jax.random.split(key, specs.act_norm_init_samples)
-            ).obj
-            flow = toggle_layer_stack(flow, False)
-            flow, _ = initialize_actnorm(flow, actnorm_batch)
-            flow = toggle_layer_stack(flow, True)
-            return flow
-
-        flow = init_actnorm(flow, next(chain))
 
     if specs.model.pretrained_model_path is not None:
         logging.info(

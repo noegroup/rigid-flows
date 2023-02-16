@@ -27,12 +27,7 @@ from .specs import SystemSpecification, TrainingSpecification
 from .system import OpenMMEnergyModel, wrap_openmm_model
 from .utils import jit_and_cleanup_cache
 
-# from .lion_optax import lion  # https://github.com/google/automl/blob/master/lion/lion_optax.py
-
-
 KeyArray = Array | jax.random.PRNGKeyArray
-
-
 Flow = Transform[DataWithAuxiliary, DataWithAuxiliary]
 
 
@@ -189,7 +184,7 @@ def update_fn(
             .modify(lambda node: jax.tree_map(lambda x: jnp.zeros_like(x), node))
         )
 
-        updates, opt_state = optim.update(grad, opt_state, eqx.filter(flow, eqx.is_array))  # type: ignore
+        updates, opt_state = optim.update(grad, opt_state)  # type: ignore
         flow = cast(
             Transform[DataWithAuxiliary, DataWithAuxiliary],
             eqx.apply_updates(flow, updates),
@@ -207,7 +202,6 @@ def train_fn(
 ):
     params = eqx.filter(flow, eqx.is_array)
     optim = optax.adam(get_scheduler(specs))
-    # optim = lion(get_scheduler(specs))
 
     opt_state = optim.init(params)  # type: ignore
 

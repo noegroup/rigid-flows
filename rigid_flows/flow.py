@@ -19,7 +19,7 @@ from .data import DataWithAuxiliary
 from .nnextra import AuxConditioner, PosConditioner, RotConditioner
 from .rigid import Rigid
 from .specs import CouplingSpecification, FlowSpecification
-from .system import SimulationBox, SPATIAL_DIM, QUATERNION_DIM
+from .system import QUATERNION_DIM, SPATIAL_DIM, SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
 Atoms = Float[Array, "... MOL SITES SPATIAL_DIM"]
@@ -77,17 +77,6 @@ class LayerStackedPipe(Pipe):
             return super().forward(input)
 
 
-def toggle_layer_stack(flow: Transform, toggle: bool) -> Transform:
-    if isinstance(flow, LayerStackedPipe):
-        return LayerStackedPipe(flow.transforms, use_scan=toggle)
-    elif isinstance(flow, Pipe):
-        return Pipe(
-            tuple(map(partial(toggle_layer_stack, toggle=toggle), flow.transforms))
-        )
-    else:
-        return flow
-
-
 @pytree_dataclass
 class RigidWithAuxiliary:
     """
@@ -104,64 +93,6 @@ class RigidWithAuxiliary:
     rigid: Rigid
     aux: Array | None
     box: SimulationBox
-
-class ActNorm(eqx.Module):
-
-    lens: lenses.ui.UnboundLens
-    mean: Array | None = None
-    log_std: Array | None = None
-
-    def forward(self, input: RigidWithAuxiliary):
-        assert self.mean is not None
-        assert self.log_std is not None
-        val = self.lens.get()(input)
-        scale = jax.nn.softplus(self.log_std) + 1e-6
-
-        val = (val - self.mean) / scale
-
-        ldj = -jnp.log(scale).sum()
-
-        output = self.lens.set(val)(input)
-        return Transformed(output, ldj)
-
-    def inverse(self, input: RigidWithAuxiliary):
-        assert self.mean is not None
-        assert self.log_std is not None
-        val = self.lens.get()(input)
-        scale = jax.nn.softplus(self.log_std) + 1e-6
-
-        val = val * scale + self.mean
-
-        ldj = jnp.log(scale).sum()
-
-        output = self.lens.set(val)(input)
-        return Transformed(output, ldj)
-
-    def initialize(self, batch: RigidWithAuxiliary):
-        val = self.lens.get()(batch)
-        std = jnp.std(val, axis=0)
-        log_std = jnp.log(jnp.exp(std) - 1 + 1e-6)
-        return ActNorm(
-            self.lens,
-            jnp.mean(val, axis=0),
-            log_std,
-        )
-
-
-def initialize_actnorm(flow: Transform, batch: Any):
-
-    if isinstance(flow, Pipe):
-        layers = []
-        for layer in flow.transforms:
-            layer, batch = initialize_actnorm(layer, batch)
-            layers.append(layer)
-        return Pipe(layers), batch
-
-    if isinstance(flow, ActNorm):
-        flow = flow.initialize(batch)
-
-    batch, _ = unpack(jax.vmap(flow.forward)(batch))
-    return flow, batch
 
 
 class QuatUpdate(eqx.Module):
@@ -337,7 +268,7 @@ class PosUpdate(eqx.Module):
             num_aux = None
         else:
             num_aux = SPATIAL_DIM
-        num_out = SPATIAL_DIM * 2 #2 due to encoding
+        num_out = SPATIAL_DIM * 2  # 2 due to encoding
         num_heads = 8
         num_channels = 32
 
@@ -472,11 +403,6 @@ def _coupling(
                 key=next(chain),
             ),
         ]
-
-        if specs.act_norm:
-            pos_block += [ActNorm(lenses.lens.pos)]
-            if auxiliary_shape is not None:
-                aux_block += [ActNorm(lenses.lens.aux)]
 
         if auxiliary_shape is not None:
             sub_block = Pipe(

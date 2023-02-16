@@ -54,8 +54,6 @@ class CouplingSpecification:
     auxiliary_update: PosAndAuxUpdateSpecification
     position_update: PosAndAuxUpdateSpecification
     quaternion_update: QuatUpdateSpecification
-    act_norm: bool
-
 
 @pytree_dataclass(frozen=True)
 class FlowSpecification:
@@ -143,7 +141,6 @@ class ExperimentSpecification:
     train: tuple[TrainingSpecification]
     reporting: ReportingSpecifications
     global_step: int | None
-    act_norm_init_samples: int | None
 
     @staticmethod
     def load_from_file(path: str) -> "ExperimentSpecification":

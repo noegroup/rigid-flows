@@ -3,8 +3,6 @@ seed: 42
 
 global_step: 0
 
-act_norm_init_samples: null #128
-
 reporting:
   num_samples: 1000 # null for no reporting
   num_samples_per_batch: 64
@@ -34,30 +32,13 @@ model:
       - num_repetitions: 4
         auxiliary_update:
           seq_len: 16
-          # activation: gelu
-          # num_pos: 3
-          # num_dims: 64
-          # expansion_factor: 2
           num_blocks: 2
-          # num_low_rank: 0
-          # low_rank_regularizer: 0.
-          # transform: gated
         position_update:
           seq_len: 16
-          # activation: gelu
-          # num_pos: 3
-          # num_dims: 64
-          # expansion_factor: 2
           num_blocks: 2
-          # num_low_rank: 0
-          # low_rank_regularizer: 0.
-          # transform: gated
         quaternion_update:
           seq_len: 16
-          # activation: gelu
-          # expansion_factor: 2
           num_blocks: 2
-        act_norm: false
       
   base:
     path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"

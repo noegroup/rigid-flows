@@ -81,10 +81,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
             )
             results["omm"] = energy(inp.pos)
         if aux and self.aux_model is not None:
-            results["aux"] = 0
-            # -self.aux_model.log_prob(inp.aux).sum(
-            # axis=(-2, -1)
-            # )
+            results["aux"] = -self.aux_model.log_prob(inp.aux).sum(axis=(-2, -1))
 
         return results
 
@@ -110,9 +107,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         idx = jax.random.randint(key, minval=0, maxval=len(self.data.pos), shape=())
         return self.sample_idx(key, idx)
 
-    def sample_idx(
-        self, key: KeyArray, idx: int
-    ) -> Transformed[DataWithAuxiliary]:
+    def sample_idx(self, key: KeyArray, idx: int) -> Transformed[DataWithAuxiliary]:
         """Samples from the target (data) distribution.
 
         Positions are taken from MD trajectory.

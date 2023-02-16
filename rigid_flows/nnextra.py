@@ -3,6 +3,8 @@ import jax
 import jax.numpy as jnp
 from flox.util import key_chain
 
+from .system import QUATERNION_DIM, SPATIAL_DIM
+
 
 class PositionConditionerBlock(eqx.Module):
 
@@ -18,11 +20,11 @@ class PositionConditionerBlock(eqx.Module):
         num_aux: int | None,
         num_heads: int,
         num_channels: int,
-        *,
-        key
+        key,
     ) -> None:
         chain = key_chain(key)
         self.num_heads = num_heads
+
         self.nodes_kq = eqx.nn.Linear(
             node_dim, num_heads * num_channels * 2, key=next(chain)
         )
@@ -33,14 +35,23 @@ class PositionConditionerBlock(eqx.Module):
         else:
             self.aux_kq = None
         self.rot_kq = eqx.nn.Linear(
-            4, num_heads * num_channels * 2, use_bias=False, key=next(chain)
+            QUATERNION_DIM,
+            num_heads * num_channels * 2,
+            use_bias=False,
+            key=next(chain),
         )
-        self.values = eqx.nn.Linear(node_dim, node_dim * num_heads * 3, key=next(chain))
+        n_types = 2 if num_aux is None else 3
+        self.values = eqx.nn.Linear(
+            node_dim, node_dim * num_heads * n_types, key=next(chain)
+        )
 
     def __call__(self, nodes, aux, rot):
-        seq_len = nodes.shape[0]
+        seq_len = nodes.shape[0]  # same as node_dim
+        n_types = 2 if aux is None else 3
 
-        val = jax.vmap(self.values)(nodes).reshape(seq_len, 3 * self.num_heads, -1)
+        val = jax.vmap(self.values)(nodes).reshape(
+            seq_len, n_types * self.num_heads, -1
+        )
 
         nodes_k, nodes_q = jnp.split(
             jax.vmap(self.nodes_kq)(nodes).reshape(seq_len, self.num_heads, -1),
@@ -127,10 +138,13 @@ class AuxiliaryConditionerBlock(eqx.Module):
             node_dim, num_heads * num_channels * 2, key=next(chain)
         )
         self.pos_kq = eqx.nn.Linear(
-            2 * 3, num_heads * num_channels * 2, key=next(chain)
+            2 * SPATIAL_DIM, num_heads * num_channels * 2, key=next(chain)
         )
         self.rot_kq = eqx.nn.Linear(
-            4, num_heads * num_channels * 2, use_bias=False, key=next(chain)
+            QUATERNION_DIM,
+            num_heads * num_channels * 2,
+            use_bias=False,
+            key=next(chain),
         )
         self.values = eqx.nn.Linear(node_dim, node_dim * num_heads * 3, key=next(chain))
 
@@ -227,7 +241,7 @@ class RotationConditionerBlock(eqx.Module):
             node_dim, num_heads * num_channels * 2, key=next(chain)
         )
         self.pos_kq = eqx.nn.Linear(
-            2 * 3, num_heads * num_channels * 2, key=next(chain)
+            2 * SPATIAL_DIM, num_heads * num_channels * 2, key=next(chain)
         )
         if num_aux is not None:
             self.aux_kq = eqx.nn.Linear(
@@ -238,7 +252,10 @@ class RotationConditionerBlock(eqx.Module):
             )
         else:
             self.aux_kq = None
-        self.values = eqx.nn.Linear(node_dim, node_dim * num_heads * 3, key=next(chain))
+        n_types = 2 if num_aux is None else 3
+        self.values = eqx.nn.Linear(
+            node_dim, node_dim * num_heads * n_types, key=next(chain)
+        )
 
     def __call__(self, nodes, pos, aux):
         pos = jnp.concatenate(
@@ -246,8 +263,11 @@ class RotationConditionerBlock(eqx.Module):
         )
 
         seq_len = nodes.shape[0]
+        n_types = 2 if aux is None else 3
 
-        val = jax.vmap(self.values)(nodes).reshape(seq_len, 3 * self.num_heads, -1)
+        val = jax.vmap(self.values)(nodes).reshape(
+            seq_len, n_types * self.num_heads, -1
+        )
 
         nodes_k, nodes_q = jnp.split(
             jax.vmap(self.nodes_kq)(nodes).reshape(seq_len, self.num_heads, -1),

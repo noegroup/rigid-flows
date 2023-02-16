@@ -15,6 +15,8 @@ from openmm import unit  # type: ignore
 from .specs import SystemSpecification
 from .systems.watermodel import WaterModel
 
+SPATIAL_DIM = 3
+QUATERNION_DIM = 4
 
 @pytree_dataclass(frozen=True)
 class SimulationBox:

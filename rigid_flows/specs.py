@@ -30,21 +30,21 @@ class PosEncoderSpecification:
 @pytree_dataclass(frozen=True)
 class PosAndAuxUpdateSpecification:
     seq_len: int
-    activation: str
-    num_dims: int
-    num_pos: int
-    expansion_factor: int
+    # activation: str
+    # num_dims: int
+    # num_pos: int
+    # expansion_factor: int
     num_blocks: int
-    transform: str
-    num_low_rank: int
-    low_rank_regularizer: float
+    # transform: str
+    # num_low_rank: int
+    # low_rank_regularizer: float
 
 
 @pytree_dataclass(frozen=True)
 class QuatUpdateSpecification:
     seq_len: int
-    activation: str
-    expansion_factor: int
+    # activation: str
+    # expansion_factor: int
     num_blocks: int
 
 

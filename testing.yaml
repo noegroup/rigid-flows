@@ -34,28 +34,28 @@ model:
       - num_repetitions: 4
         auxiliary_update:
           seq_len: 16
-          activation: gelu
-          num_pos: 3
-          num_dims: 64
-          expansion_factor: 2
+          # activation: gelu
+          # num_pos: 3
+          # num_dims: 64
+          # expansion_factor: 2
           num_blocks: 2
-          num_low_rank: 0
-          low_rank_regularizer: 0.
-          transform: gated
+          # num_low_rank: 0
+          # low_rank_regularizer: 0.
+          # transform: gated
         position_update:
           seq_len: 16
-          activation: gelu
-          num_pos: 3
-          num_dims: 64
-          expansion_factor: 2
+          # activation: gelu
+          # num_pos: 3
+          # num_dims: 64
+          # expansion_factor: 2
           num_blocks: 2
-          num_low_rank: 0
-          low_rank_regularizer: 0.
-          transform: gated
+          # num_low_rank: 0
+          # low_rank_regularizer: 0.
+          # transform: gated
         quaternion_update:
           seq_len: 16
-          activation: gelu
-          expansion_factor: 2
+          # activation: gelu
+          # expansion_factor: 2
           num_blocks: 2
         act_norm: false
       
@@ -95,11 +95,11 @@ model:
 train:
 
   # first stage: only likelihood
-  - num_epochs: 5
-    num_iters_per_epoch: 500
+  - num_epochs: 3
+    num_iters_per_epoch: 1000
 
-    init_learning_rate: 1e-3
-    target_learning_rate: 1e-4
+    init_learning_rate: 5e-3
+    target_learning_rate: 5e-4
 
     weight_nll: 0.
 

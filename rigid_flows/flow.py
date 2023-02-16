@@ -19,19 +19,13 @@ from .data import DataWithAuxiliary
 from .nnextra import AuxConditioner, PosConditioner, RotConditioner
 from .rigid import Rigid
 from .specs import CouplingSpecification, FlowSpecification
-from .system import SimulationBox
+from .system import SimulationBox, SPATIAL_DIM, QUATERNION_DIM
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
-
-
-Scalar = Float[Array, ""] | float
-Vector3 = Float[Array, "... 3"]
-Quaternion = Float[Array, "... 4"]
-Auxiliary = Float[Array, f"... AUX"]
-
-Atoms = Float[Array, "... MOL SITES 3"]
+Atoms = Float[Array, "... MOL SITES SPATIAL_DIM"]
 
 MOEBIUS_SLACK = 0.95
+IDENTITY_GATE = 5.0
 
 
 class RigidTransform(Transform[Atoms, Rigid]):
@@ -111,54 +105,6 @@ class RigidWithAuxiliary:
     aux: Array | None
     box: SimulationBox
 
-
-def affine_quat_fwd(q, A):
-    A = jnp.eye(4) + A.reshape(4, 4)
-    q_ = A @ q
-    ldj = jnp.linalg.slogdet(A)[1] - 4 * jnp.log(geom.norm(q_))
-    q_ = geom.unit(q_)
-    return q_, ldj
-
-
-def affine_quat_inv(q, A):
-    A = jnp.eye(4) + A.reshape(4, 4)
-    A = jnp.linalg.inv(A)
-    q_ = A @ q
-    ldj = jnp.linalg.slogdet(A)[1] - 4 * jnp.log(geom.norm(q_))
-    q_ = geom.unit(q_)
-    return q_, ldj
-
-
-@pytree_dataclass
-class QuaternionAffine:
-
-    M: Array
-
-    def forward(self, input: Array):
-        new, ldj = affine_quat_fwd(input, self.M)
-        return Transformed(new, ldj)
-
-    def inverse(self, input: Array):
-        new, ldj = affine_quat_inv(input, self.M)
-        return Transformed(new, ldj)
-
-
-def affine_forward(p, params):
-    m, t = jnp.split(params, (9,), axis=0)  # type: ignore
-    m = m.reshape(3, 3) + jnp.eye(3)
-    p = m @ p + t
-    ldj = jnp.log(jnp.abs(geom.det3x3(m)))
-    return p, ldj
-
-
-def affine_inverse(p, params):
-    m, t = jnp.split(params, (9,), axis=0)  # type: ignore
-    m = m.reshape(3, 3) + jnp.eye(3)
-    p = jnp.linalg.inv(m) @ (p - t)
-    ldj = -jnp.log(jnp.abs(geom.det3x3(m)))
-    return p, ldj
-
-
 class ActNorm(eqx.Module):
 
     lens: lenses.ui.UnboundLens
@@ -228,16 +174,12 @@ class QuatUpdate(eqx.Module):
         auxiliary_shape: tuple[int, ...] | None,
         num_blocks: int,
         seq_len: int,
-        *,
         key: KeyArray,
-        **kwargs,
     ):
         """Flow layer updating the quaternion part of a state.
 
         Args:
             auxiliary_shape (tuple[int, ...]): shape of auxilaries
-            num_pos (int, optional): number of position DoF. Defaults to 3.
-            num_rot (int, optional): number of quaternion DoF. Defaults to 4.
             num_heads (int, optional): number of transformer heads. Defaults to 4.
             num_dims (int, optional): node dimension within the transformer stack. Defaults to 64.
             num_hidden (int, optional): hidden dim of transformer. Defaults to 64.
@@ -246,9 +188,9 @@ class QuatUpdate(eqx.Module):
         """
         chain = key_chain(key)
 
-        num_out = 4
+        num_out = QUATERNION_DIM
         if auxiliary_shape is not None:
-            num_aux = auxiliary_shape[-1]
+            num_aux = SPATIAL_DIM
         else:
             num_aux = None
         num_heads = 8
@@ -272,11 +214,11 @@ class QuatUpdate(eqx.Module):
         Returns:
             Array: the parameter (reflection) of the double moebius transform
         """
-        out = self.net(input.rigid.pos, input.aux * 0)
+        out = self.net(input.rigid.pos, input.aux)
 
         reflection, gate = jnp.split(out, 2, axis=-1)
 
-        reflection = reflection * jax.nn.sigmoid(gate - 3.0)
+        reflection = reflection * jax.nn.sigmoid(gate - IDENTITY_GATE)
 
         reflection = reflection.reshape(input.rigid.rot.shape)
         reflection = jax.vmap(lambda x: x / (1 + geom.norm(x)) * MOEBIUS_SLACK)(
@@ -320,9 +262,7 @@ class AuxUpdate(eqx.Module):
         auxiliary_shape: tuple[int, ...],
         num_blocks: int,
         seq_len: int,
-        *,
         key: KeyArray,
-        **kwargs,
     ):
         """Flow layer updating the auxiliary part of a state.
 
@@ -336,7 +276,7 @@ class AuxUpdate(eqx.Module):
             key (KeyArray): PRNGKey for param initialization
         """
         chain = key_chain(key)
-        num_aux = auxiliary_shape[-1]
+        num_aux = SPATIAL_DIM
         num_out = 2 * num_aux
         num_heads = 8
         num_channels = 32
@@ -360,7 +300,7 @@ class AuxUpdate(eqx.Module):
         """
         out = self.net(input.rigid.pos, input.rigid.rot).reshape(input.aux.shape[0], -1)
         out, gate = jnp.split(out, 2, axis=-1)
-        out = out * jax.nn.sigmoid(gate - 3.0)
+        out = out * jax.nn.sigmoid(gate - IDENTITY_GATE)
 
         shift, scale = jnp.split(out, 2, axis=-1)  # type: ignore
         return shift, scale
@@ -387,22 +327,17 @@ class PosUpdate(eqx.Module):
     def __init__(
         self,
         auxiliary_shape: tuple[int, ...] | None,
-        num_pos: int,
-        num_dims: int,
         num_blocks: int,
         seq_len: int,
-        *,
         key: KeyArray,
-        **kwargs,
     ):
         chain = key_chain(key)
 
-        # num_aux = 3
         if auxiliary_shape is None:
             num_aux = None
         else:
-            num_aux = auxiliary_shape[-1]
-        num_out = num_pos * 2  # TODO try with different number of blocks
+            num_aux = SPATIAL_DIM
+        num_out = SPATIAL_DIM * 2 #2 due to encoding
         num_heads = 8
         num_channels = 32
 
@@ -417,10 +352,10 @@ class PosUpdate(eqx.Module):
         )
 
     def params(self, input: RigidWithAuxiliary):
-        params = self.net(input.aux * 0, input.rigid.rot)
+        params = self.net(input.aux, input.rigid.rot)
         params = params.reshape(*input.rigid.pos.shape, -1)
         params, gate = jnp.split(params, 2, axis=-1)
-        params = params * jax.nn.sigmoid(gate - 6.0)
+        params = params * jax.nn.sigmoid(gate - IDENTITY_GATE)
         reflection = params.reshape(*input.rigid.pos.shape, 2)
         reflection = jax.vmap(
             jax.vmap(lambda x: x / (1 + geom.norm(x)) * MOEBIUS_SLACK)
@@ -522,7 +457,7 @@ def _coupling(
     chain = key_chain(key)
     blocks = []
     for _ in range(specs.num_repetitions):
-        if False:  # auxiliary_shape is not None:
+        if auxiliary_shape is not None:
             aux_block = [
                 AuxUpdate(
                     auxiliary_shape=auxiliary_shape,
@@ -543,7 +478,7 @@ def _coupling(
             if auxiliary_shape is not None:
                 aux_block += [ActNorm(lenses.lens.aux)]
 
-        if False:  # auxiliary_shape is not None:
+        if auxiliary_shape is not None:
             sub_block = Pipe(
                 [
                     *aux_block,

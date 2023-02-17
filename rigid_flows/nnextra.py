@@ -81,6 +81,8 @@ class PositionConditionerBlock(eqx.Module):
         logits = logits.at[..., -self.num_heads :].set(
             jnp.square(logits[..., -self.num_heads :])
         )
+        logits = logits / jnp.sqrt(self.num_heads)
+
         att = jax.nn.softmax(logits, axis=-2)
         out = jnp.einsum("ijh, jhd -> id", att, val)
 
@@ -138,7 +140,7 @@ class AuxiliaryConditionerBlock(eqx.Module):
             node_dim, num_heads * num_channels * 2, key=next(chain)
         )
         self.pos_kq = eqx.nn.Linear(
-            2 * SPATIAL_DIM, num_heads * num_channels * 2, key=next(chain)
+            SPATIAL_DIM, num_heads * num_channels * 2, key=next(chain)
         )
         self.rot_kq = eqx.nn.Linear(
             QUATERNION_DIM,
@@ -149,10 +151,6 @@ class AuxiliaryConditionerBlock(eqx.Module):
         self.values = eqx.nn.Linear(node_dim, node_dim * num_heads * 3, key=next(chain))
 
     def __call__(self, nodes, pos, rot):
-        pos = jnp.concatenate(
-            [jnp.cos(2 * jnp.pi * pos), jnp.sin(2 * jnp.pi * pos)], axis=-1
-        )
-
         seq_len = nodes.shape[0]
 
         val = jax.vmap(self.values)(nodes).reshape(seq_len, 3 * self.num_heads, -1)
@@ -181,6 +179,7 @@ class AuxiliaryConditionerBlock(eqx.Module):
         logits = logits.at[..., -self.num_heads :].set(
             jnp.square(logits[..., -self.num_heads :])
         )
+        logits = logits / jnp.sqrt(self.num_heads)
         att = jax.nn.softmax(logits, axis=-2)
         out = jnp.einsum("ijh, jhd -> id", att, val)
 
@@ -227,12 +226,7 @@ class RotationConditionerBlock(eqx.Module):
     num_heads: int
 
     def __init__(
-        self,
-        node_dim: int,
-        num_aux: int | None,
-        num_heads: int,
-        num_channels: int,
-        key
+        self, node_dim: int, num_aux: int | None, num_heads: int, num_channels: int, key
     ) -> None:
         chain = key_chain(key)
         self.num_heads = num_heads
@@ -240,7 +234,7 @@ class RotationConditionerBlock(eqx.Module):
             node_dim, num_heads * num_channels * 2, key=next(chain)
         )
         self.pos_kq = eqx.nn.Linear(
-            2 * SPATIAL_DIM, num_heads * num_channels * 2, key=next(chain)
+            SPATIAL_DIM, num_heads * num_channels * 2, key=next(chain)
         )
         if num_aux is not None:
             self.aux_kq = eqx.nn.Linear(
@@ -257,10 +251,6 @@ class RotationConditionerBlock(eqx.Module):
         )
 
     def __call__(self, nodes, pos, aux):
-        pos = jnp.concatenate(
-            [jnp.cos(2 * jnp.pi * pos), jnp.sin(2 * jnp.pi * pos)], axis=-1
-        )
-
         seq_len = nodes.shape[0]
         n_types = 2 if aux is None else 3
 
@@ -293,6 +283,7 @@ class RotationConditionerBlock(eqx.Module):
             q = jnp.concatenate([nodes_q, pos_q], axis=-2)
 
         logits = jnp.einsum("ihc, jhc -> ijh", k, q)
+        logits = logits / jnp.sqrt(self.num_heads)
 
         att = jax.nn.softmax(logits, axis=-2)
         out = jnp.einsum("ijh, jhd -> id", att, val)

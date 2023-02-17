@@ -3,14 +3,11 @@ import logging
 import jax
 import lenses
 import numpy as np
-from flox import geom
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 
 from .system import ErrorHandling, OpenMMEnergyModel, SimulationBox, SystemSpecification
-
-# from .utils import smooth_maximum
 
 logger = logging.getLogger("rigid-flows")
 
@@ -22,14 +19,6 @@ def unwrap(pos: jnp.ndarray, box: jnp.ndarray):
         pos - jnp.sign(pos - pos[0]) * box,
         pos,
     )
-
-
-def boxify_oxy(pos, box: jnp.ndarray):
-    oxy = pos[..., 0, :]
-    boxed_oxy = oxy % box
-    diff = boxed_oxy - oxy
-    pos = pos + diff[..., None, :]
-    return pos
 
 
 @pytree_dataclass(frozen=True)
@@ -99,15 +88,15 @@ class PreprocessedData:
     @staticmethod
     def from_data(data: Data) -> "PreprocessedData":
 
-        ## remove com position (but it should already be almost ok)
+        ## remove PBC
         pos = unwrap(data.pos, data.box)
+
+        ## set molecules com position to fix point (box center)
         pos = (
             pos
-            - pos.mean(axis=(1, 2), keepdims=True)
-            + pos.mean(axis=(0, 1, 2), keepdims=True)
+            - pos[:,:,:1].mean(axis=(1), keepdims=True)
+            + data.box / 2
         )
-        # make sure oxygen positions are in the box
-        pos = boxify_oxy(pos, data.box)
 
         return PreprocessedData(pos, data.box, data.energy, data.force)
 

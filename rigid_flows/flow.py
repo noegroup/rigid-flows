@@ -8,7 +8,7 @@ import jax
 import lenses
 from flox import geom
 from flox._src.flow.impl import Affine, Moebius
-from flox.flow import DoubleMoebius, Pipe, Transform, Transformed
+from flox.flow import DoubleMoebius, Inverted, Pipe, Transform, Transformed, bind, pure
 from flox.util import key_chain, unpack
 from jax import Array
 from jax import numpy as jnp
@@ -23,6 +23,7 @@ from .system import QUATERNION_DIM, SPATIAL_DIM, SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
 Atoms = Float[Array, "... MOL SITES SPATIAL_DIM"]
+Molecules = Float[Array, "... MOL 1 SPATIAL_DIM"]
 
 MOEBIUS_SLACK = 0.95
 IDENTITY_GATE = 5.0
@@ -36,9 +37,6 @@ class RigidTransform(Transform[Atoms, Rigid]):
     def inverse(self, inp: Rigid) -> Transformed[Atoms]:
         atom_rep = inp.asarray()
         return Transformed(atom_rep, jnp.zeros(()))
-
-
-from flox.flow import Inverted, Transform, Transformed, bind, pure
 
 
 @pytree_dataclass(frozen=True)
@@ -250,7 +248,7 @@ class PosUpdate(eqx.Module):
             num_aux = SPATIAL_DIM
         else:
             num_aux = None
-        num_out = SPATIAL_DIM * 2  # 2 due to encoding
+        num_out = SPATIAL_DIM * 2
 
         self.net = PosConditioner(
             seq_len,
@@ -263,73 +261,42 @@ class PosUpdate(eqx.Module):
         )
 
     def params(self, input: RigidWithAuxiliary):
-        params = self.net(input.aux, input.rigid.rot)
-        params = params.reshape(*input.rigid.pos.shape, -1)
+        params = self.net(input.aux, input.rigid.rot).reshape(
+            input.rigid.pos.shape[0], -1
+        )
         params, gate = jnp.split(params, 2, axis=-1)
         params = params * jax.nn.sigmoid(gate - IDENTITY_GATE)
-        reflection = params.reshape(*input.rigid.pos.shape, 2)
-        reflection = jax.vmap(
-            jax.vmap(lambda x: x / (1 + geom.norm(x)) * MOEBIUS_SLACK)
-        )(reflection)
-        return reflection
 
-    def forward(
-        self,
-        input: RigidWithAuxiliary,
-    ):
-        params = self.params(input)
+        shift, scale = jnp.split(params, 2, axis=-1)  # type: ignore
+        return shift, scale
 
-        rad = input.rigid.pos / input.box.size
-        pos = jnp.stack(
-            [
-                jnp.cos(2 * jnp.pi * rad - jnp.pi),
-                jnp.sin(2 * jnp.pi * rad - jnp.pi),
-            ],
-            axis=-1,
-        )
-        pos, ldj = unpack(
-            jax.vmap(jax.vmap(lambda ref, pos: Moebius(ref).forward(pos)))(params, pos)
-        )
-        pos = jnp.arctan2(pos[..., 1], pos[..., 0])
-        pos = (pos + jnp.pi) / (2 * jnp.pi)
-        pos = pos * input.box.size
+    def forward(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
+        """Forward transform"""
+        shift, scale = self.params(input)
+        pipe = Affine(shift, scale)
+        pos, ldj = unpack(pipe.forward(input.rigid.pos))
+        return Transformed(lenses.bind(input).rigid.pos.set(pos), ldj)
 
-        ldj = jnp.sum(ldj)
-
-        output = lenses.bind(input).rigid.pos.set(pos)
-        return Transformed(output, ldj)
-
-    def inverse(
-        self,
-        input: RigidWithAuxiliary,
-    ):
-        params = self.params(input)
-
-        rad = input.rigid.pos / input.box.size
-        pos = jnp.stack(
-            [
-                jnp.cos(2 * jnp.pi * rad - jnp.pi),
-                jnp.sin(2 * jnp.pi * rad - jnp.pi),
-            ],
-            axis=-1,
-        )
-        pos, ldj = unpack(
-            jax.vmap(jax.vmap(lambda ref, pos: Moebius(ref).inverse(pos)))(params, pos)
-        )
-        pos = jnp.arctan2(pos[..., 1], pos[..., 0])
-        pos = (pos + jnp.pi) / (2 * jnp.pi)
-        pos = pos * input.box.size
-
-        ldj = jnp.sum(ldj)
-
-        output = lenses.bind(input).rigid.pos.set(pos)
-        return Transformed(output, ldj)
+    def inverse(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
+        """Inverse transform"""
+        shift, scale = self.params(input)
+        pipe = Affine(shift, scale)
+        pos, ldj = unpack(pipe.inverse(input.rigid.pos))
+        return Transformed(lenses.bind(input).rigid.pos.set(pos), ldj)
 
 
 class EuclideanToRigidTransform(equinox.Module):
+    """Rigid bodies positions are relative to a reference lattice"""
+
+    ref_lattice: Molecules
+
+    def __init__(self, ref_lattice: Molecules) -> None:
+        super().__init__()
+        self.ref_lattice = ref_lattice
+
     def forward(self, input: DataWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         transform = RigidTransform()
-        rigid, _ = unpack(jax.vmap(transform.forward)(input.pos))
+        rigid, _ = unpack(jax.vmap(transform.forward)(input.pos - self.ref_lattice))
         ldj = jnp.zeros(())
         return Transformed(
             RigidWithAuxiliary(rigid, input.aux, input.box),
@@ -342,7 +309,7 @@ class EuclideanToRigidTransform(equinox.Module):
         ldj = jnp.zeros(())
         sign = jnp.sign(input.rigid.rot[:, (0,)])
         return Transformed(
-            DataWithAuxiliary(pos, input.aux, sign, input.box, None),
+            DataWithAuxiliary(pos + self.ref_lattice, input.aux, sign, input.box, None),
             ldj,
         )
 
@@ -400,6 +367,7 @@ def build_flow(
     key: KeyArray,
     num_molecules: int,
     use_auxiliary: bool,
+    ref_lattice: Molecules,
     specs: FlowSpecification,
 ) -> Pipe[DataWithAuxiliary, DataWithAuxiliary]:
     """Creates the final flow composed of:
@@ -423,8 +391,8 @@ def build_flow(
     couplings = LayerStackedPipe(blocks, use_scan=True)
     return Pipe(
         [
-            EuclideanToRigidTransform(),
+            EuclideanToRigidTransform(ref_lattice),
             couplings,
-            Inverted(EuclideanToRigidTransform()),
+            Inverted(EuclideanToRigidTransform(ref_lattice)),
         ]
     )

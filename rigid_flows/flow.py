@@ -26,7 +26,7 @@ Atoms = Float[Array, "... MOL SITES SPATIAL_DIM"]
 Molecules = Float[Array, "... MOL 1 SPATIAL_DIM"]
 
 MOEBIUS_SLACK = 0.95
-IDENTITY_GATE = 5.0
+IDENTITY_GATE = 4.0
 
 
 class RigidTransform(Transform[Atoms, Rigid]):

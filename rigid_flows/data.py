@@ -94,8 +94,8 @@ class PreprocessedData:
         ## set molecules com position to fix point (box center)
         pos = (
             pos
-            - pos[:,:,:1].mean(axis=(1), keepdims=True)
-            + data.box / 2
+            - pos[:, :, :1].mean(axis=(1), keepdims=True)
+            # + data.box / 2
         )
 
         return PreprocessedData(pos, data.box, data.energy, data.force)

@@ -11,7 +11,7 @@ from jax import Array
 
 from .data import Data, DataWithAuxiliary, PreprocessedData
 from .specs import SystemSpecification
-from .system import OpenMMEnergyModel, SimulationBox, wrap_openmm_model, SPATIAL_DIM
+from .system import SPATIAL_DIM, OpenMMEnergyModel, SimulationBox, wrap_openmm_model
 
 T = TypeVar("T")
 
@@ -34,11 +34,16 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         aux_model: tfp.distributions.Distribution | None,
         data: PreprocessedData,
         stored_energies: bool = True,
+        com_std_scaling: float = 0.05,
     ):
         self.aux_model = aux_model
         self.sys_specs = sys_specs
         self.omm_model = omm_model
         self.data = data
+
+        com_means = data.box.reshape(3) / 2
+        com_stds = data.box.reshape(3) / omm_model.model.n_molecules * com_std_scaling
+        self.com_model = tfp.distributions.Normal(com_means, com_stds)
 
         if stored_energies:
             self.omm_energies = self.compute_energies(
@@ -70,6 +75,9 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
         results = {}
 
+        results["com"] = -self.com_model.log_prob(
+            inp.pos[..., :, 0, :].mean(axis=-2)
+        ).sum(axis=-1)
         if omm:
             if not self.sys_specs.fixed_box:
                 raise NotImplementedError()
@@ -125,6 +133,9 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         pos = self.data.pos[idx].reshape(-1, self.omm_model.model.n_sites, 3)
 
         chain = key_chain(key)
+        com = self.com_model.sample(seed=next(chain))
+        pos = pos + com
+
         if self.aux_model is None:
             aux = None
         else:
@@ -139,12 +150,15 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         if self.omm_energies is not None:
             energy = self.omm_energies[idx]
             if self.aux_model is not None:
-                energy = (
-                    energy
-                    + self.compute_energies(
-                        sample, omm=False, aux=True, has_batch_dim=False
-                    )["aux"]
+                extra_ene = self.compute_energies(
+                    sample, omm=False, aux=True, has_batch_dim=False
                 )
+                energy = energy + extra_ene["aux"] + extra_ene["com"]
+                #     energy
+                #     + self.compute_energies(
+                #         sample, omm=False, aux=True, has_batch_dim=False
+                #     )["aux"]
+                # )
         else:
             energy = self.potential(sample)
 

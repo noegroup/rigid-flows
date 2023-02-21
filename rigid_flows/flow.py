@@ -26,7 +26,45 @@ Atoms = Float[Array, "... MOL SITES SPATIAL_DIM"]
 Molecules = Float[Array, "... MOL 1 SPATIAL_DIM"]
 
 MOEBIUS_SLACK = 0.95
-IDENTITY_GATE = 4.0
+IDENTITY_GATE = 3.0
+
+
+def PosEncoder(pos, box: SimulationBox):
+    rad = pos / box.size
+    enc_pos = jnp.stack(
+        [
+            jnp.cos(2 * jnp.pi * rad - jnp.pi),
+            jnp.sin(2 * jnp.pi * rad - jnp.pi),
+        ],
+        axis=-1,
+    )
+    return enc_pos
+
+
+def PosDecoder(enc_pos, box: SimulationBox):
+    pos = jnp.arctan2(enc_pos[..., 1], enc_pos[..., 0])
+    pos = (pos + jnp.pi) / (2 * jnp.pi)
+    return pos * box.size
+
+
+# class QuatEncoder(eqx.Module):
+#     """Encodes a quaternion into a flip-invariant representation."""
+
+#     encoder: eqx.nn.Linear
+
+#     def __init__(self, num_out: int, *, key: KeyArray):
+#         """Encodes a quaternion into a flip-invariant representation.
+#         Args:
+#             num_out (int): number of dimensions of output representation.
+#             key (KeyArray): PRNG Key for layer initialization
+#         """
+#         self.encoder = eqx.nn.Linear(4, num_out + 1, key=key)
+
+#     def __call__(self, quat: Quaternion) -> Quaternion:
+#         inp = jnp.stack([quat, -quat])
+#         out = jax.vmap(jax.vmap(self.encoder))(inp)
+#         weight = jax.nn.softmax(out[..., 0], axis=0)
+#         return (weight[..., None] * out[..., 1:]).sum(axis=0)
 
 
 class RigidTransform(Transform[Atoms, Rigid]):
@@ -134,7 +172,10 @@ class QuatUpdate(eqx.Module):
         Returns:
             Array: the parameter (reflection) of the double moebius transform
         """
-        out = self.net(input.rigid.pos, input.aux)
+        enc_pos = PosEncoder(input.rigid.pos, input.box).reshape(
+            (*input.rigid.pos.shape[:-1], 2 * SPATIAL_DIM)
+        )
+        out = self.net(enc_pos, input.aux)
 
         reflection, gate = jnp.split(out, 2, axis=-1)
 
@@ -151,10 +192,10 @@ class QuatUpdate(eqx.Module):
         """Forward transform"""
         reflection = self.params(input)
 
-        def trafo(ref, rot):
+        def trasfo(ref, rot):
             return DoubleMoebius(ref).forward(rot)
 
-        rot, ldj = unpack(jax.vmap(trafo)(reflection, input.rigid.rot))
+        rot, ldj = unpack(jax.vmap(trasfo)(reflection, input.rigid.rot))
         output = lenses.bind(input).rigid.rot.set(rot)
         ldj = jnp.sum(ldj)
         return Transformed(output, ldj)
@@ -163,10 +204,10 @@ class QuatUpdate(eqx.Module):
         """Inverse transform"""
         reflection = self.params(input)
 
-        def trafo(ref, rot) -> Transformed[Array]:
+        def trasfo(ref, rot) -> Transformed[Array]:
             return DoubleMoebius(ref).inverse(rot)
 
-        rot, ldj = unpack(jax.vmap(trafo)(reflection, input.rigid.rot))
+        rot, ldj = unpack(jax.vmap(trasfo)(reflection, input.rigid.rot))
         output = lenses.bind(input).rigid.rot.set(rot)
         ldj = jnp.sum(ldj)
         return Transformed(output, ldj)
@@ -175,7 +216,7 @@ class QuatUpdate(eqx.Module):
 class AuxUpdate(eqx.Module):
     """Flow layer updating the auxiliary part of a state"""
 
-    net: AuxConditioner  # | eqx.nn.Sequential | Conv
+    net: AuxConditioner
 
     def __init__(
         self,
@@ -207,7 +248,10 @@ class AuxUpdate(eqx.Module):
         Returns:
             tuple[Array, Array]: the parameters (shift, scale) of the affine transform
         """
-        out = self.net(input.rigid.pos, input.rigid.rot).reshape(input.aux.shape[0], -1)
+        enc_pos = PosEncoder(input.rigid.pos, input.box).reshape(
+            (*input.rigid.pos.shape[:-1], 2 * SPATIAL_DIM)
+        )
+        out = self.net(enc_pos, input.rigid.rot).reshape(input.aux.shape[0], -1)
         out, gate = jnp.split(out, 2, axis=-1)
         out = out * jax.nn.sigmoid(gate - IDENTITY_GATE)
 
@@ -261,28 +305,51 @@ class PosUpdate(eqx.Module):
         )
 
     def params(self, input: RigidWithAuxiliary):
-        params = self.net(input.aux, input.rigid.rot).reshape(
-            input.rigid.pos.shape[0], -1
-        )
-        params, gate = jnp.split(params, 2, axis=-1)
-        params = params * jax.nn.sigmoid(gate - IDENTITY_GATE)
+        out = self.net(input.aux, input.rigid.rot)
+        out = out.reshape(*input.rigid.pos.shape, -1)
 
-        shift, scale = jnp.split(params, 2, axis=-1)  # type: ignore
-        return shift, scale
+        reflection, gate = jnp.split(out, 2, axis=-1)
+        reflection = reflection * jax.nn.sigmoid(gate - 2 * IDENTITY_GATE)
+        reflection = reflection.reshape(*input.rigid.pos.shape, 2)
+
+        reflection.at[0].multiply(0)  # do not move the first molecule
+        reflection = jax.vmap(
+            jax.vmap(lambda x: x / (1 + geom.norm(x)) * MOEBIUS_SLACK)
+        )(reflection)
+        return reflection
 
     def forward(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Forward transform"""
-        shift, scale = self.params(input)
-        pipe = Affine(shift, scale)
-        pos, ldj = unpack(pipe.forward(input.rigid.pos))
-        return Transformed(lenses.bind(input).rigid.pos.set(pos), ldj)
+        reflection = self.params(input)
+
+        @jax.vmap
+        def trasfo(ref, enc_pos):
+            return Moebius(ref).forward(enc_pos)
+
+        enc_pos = PosEncoder(input.rigid.pos, input.box)
+        enc_pos, ldj = unpack(jax.vmap(trasfo)(reflection, enc_pos))
+        pos = PosDecoder(enc_pos, input.box)
+
+        ldj = jnp.sum(ldj)
+        output = lenses.bind(input).rigid.pos.set(pos)
+        return Transformed(output, ldj)
 
     def inverse(self, input: RigidWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         """Inverse transform"""
-        shift, scale = self.params(input)
-        pipe = Affine(shift, scale)
-        pos, ldj = unpack(pipe.inverse(input.rigid.pos))
-        return Transformed(lenses.bind(input).rigid.pos.set(pos), ldj)
+
+        reflection = self.params(input)
+
+        @jax.vmap
+        def trasfo(ref, enc_pos):
+            return Moebius(ref).inverse(enc_pos)
+
+        enc_pos = PosEncoder(input.rigid.pos, input.box)
+        enc_pos, ldj = unpack(jax.vmap(trasfo)(reflection, enc_pos))
+        pos = PosDecoder(enc_pos, input.box)
+
+        ldj = jnp.sum(ldj)
+        output = lenses.bind(input).rigid.pos.set(pos)
+        return Transformed(output, ldj)
 
 
 class EuclideanToRigidTransform(equinox.Module):

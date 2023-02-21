@@ -74,10 +74,6 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
     ):
 
         results = {}
-
-        results["com"] = -self.com_model.log_prob(
-            inp.pos[..., :, 0, :].mean(axis=-2)
-        ).sum(axis=-1)
         if omm:
             if not self.sys_specs.fixed_box:
                 raise NotImplementedError()
@@ -130,12 +126,9 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         Returns:
             Transformed[AugmentedData]: Sample from the target distribution.
         """
-        pos = self.data.pos[idx].reshape(-1, self.omm_model.model.n_sites, 3)
+        pos = self.data.pos[idx]
 
         chain = key_chain(key)
-        com = self.com_model.sample(seed=next(chain))
-        pos = pos + com
-
         if self.aux_model is None:
             aux = None
         else:
@@ -150,15 +143,12 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         if self.omm_energies is not None:
             energy = self.omm_energies[idx]
             if self.aux_model is not None:
-                extra_ene = self.compute_energies(
-                    sample, omm=False, aux=True, has_batch_dim=False
+                energy = (
+                    energy
+                    + self.compute_energies(
+                        sample, omm=False, aux=True, has_batch_dim=False
+                    )["aux"]
                 )
-                energy = energy + extra_ene["aux"] + extra_ene["com"]
-                #     energy
-                #     + self.compute_energies(
-                #         sample, omm=False, aux=True, has_batch_dim=False
-                #     )["aux"]
-                # )
         else:
             energy = self.potential(sample)
 

@@ -7,18 +7,10 @@ from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 
-from .system import ErrorHandling, OpenMMEnergyModel, SimulationBox, SystemSpecification
+from .system import (ErrorHandling, OpenMMEnergyModel, SimulationBox,
+                     SystemSpecification)
 
 logger = logging.getLogger("rigid-flows")
-
-
-def unwrap(pos: jnp.ndarray, box: jnp.ndarray):
-    """ "Using as reference the first configuration"""
-    return jnp.where(
-        jnp.abs(pos - pos[0]) / box > 0.5,
-        pos - jnp.sign(pos - pos[0]) * box,
-        pos,
-    )
 
 
 @pytree_dataclass(frozen=True)
@@ -88,15 +80,19 @@ class PreprocessedData:
     @staticmethod
     def from_data(data: Data) -> "PreprocessedData":
 
-        ## remove PBC
-        pos = unwrap(data.pos, data.box)
-
-        ## set molecules com position to fix point (box center)
-        pos = (
-            pos
-            - pos[:, :, :1].mean(axis=(1), keepdims=True)
-            # + data.box / 2
+        ## unwrap positions with respect to first frame
+        pos = jnp.where(
+            jnp.abs(data.pos - data.pos[0]) / data.box > 0.5,
+            data.pos - jnp.sign(data.pos - data.pos[0]) * data.box,
+            data.pos,
         )
+
+        ## remove global translation using first molecule
+        pos = pos - pos[:, :1, :1]
+
+        ## put molecules back into PBC (without breaiking them)
+        shift = (pos[:,:,:1] % data.box) - pos[:,:,:1]
+        pos = pos + shift
 
         return PreprocessedData(pos, data.box, data.energy, data.force)
 

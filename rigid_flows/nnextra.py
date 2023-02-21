@@ -140,7 +140,7 @@ class AuxiliaryConditionerBlock(eqx.Module):
             node_dim, num_heads * num_channels * 2, key=next(chain)
         )
         self.pos_kq = eqx.nn.Linear(
-            SPATIAL_DIM, num_heads * num_channels * 2, key=next(chain)
+            2 * SPATIAL_DIM, num_heads * num_channels * 2, key=next(chain)
         )
         self.rot_kq = eqx.nn.Linear(
             QUATERNION_DIM,
@@ -234,7 +234,7 @@ class RotationConditionerBlock(eqx.Module):
             node_dim, num_heads * num_channels * 2, key=next(chain)
         )
         self.pos_kq = eqx.nn.Linear(
-            SPATIAL_DIM, num_heads * num_channels * 2, key=next(chain)
+            2 * SPATIAL_DIM, num_heads * num_channels * 2, key=next(chain)
         )
         if num_aux is not None:
             self.aux_kq = eqx.nn.Linear(

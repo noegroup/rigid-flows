@@ -45,7 +45,7 @@ model:
     num_molecules: 16
     temperature: 250
     ice_type: XI
-    water_type: tip4pice
+    water_type: tip4pew
     recompute_forces: false
     store_forces: false
     forces_path: null
@@ -61,7 +61,7 @@ model:
     num_molecules: 16
     temperature: 100
     ice_type: XI
-    water_type: tip4pice
+    water_type: tip4pew
     recompute_forces: false
     store_forces: false
     forces_path: null

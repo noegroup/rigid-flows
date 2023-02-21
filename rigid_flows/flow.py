@@ -23,7 +23,6 @@ from .system import QUATERNION_DIM, SPATIAL_DIM, SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
 Atoms = Float[Array, "... MOL SITES SPATIAL_DIM"]
-Molecules = Float[Array, "... MOL 1 SPATIAL_DIM"]
 
 MOEBIUS_SLACK = 0.95
 IDENTITY_GATE = 3.0
@@ -353,17 +352,9 @@ class PosUpdate(eqx.Module):
 
 
 class EuclideanToRigidTransform(equinox.Module):
-    """Rigid bodies positions are relative to a reference lattice"""
-
-    ref_lattice: Molecules
-
-    def __init__(self, ref_lattice: Molecules) -> None:
-        super().__init__()
-        self.ref_lattice = ref_lattice
-
     def forward(self, input: DataWithAuxiliary) -> Transformed[RigidWithAuxiliary]:
         transform = RigidTransform()
-        rigid, _ = unpack(jax.vmap(transform.forward)(input.pos - self.ref_lattice))
+        rigid, _ = unpack(jax.vmap(transform.forward)(input.pos))
         ldj = jnp.zeros(())
         return Transformed(
             RigidWithAuxiliary(rigid, input.aux, input.box),
@@ -376,7 +367,7 @@ class EuclideanToRigidTransform(equinox.Module):
         ldj = jnp.zeros(())
         sign = jnp.sign(input.rigid.rot[:, (0,)])
         return Transformed(
-            DataWithAuxiliary(pos + self.ref_lattice, input.aux, sign, input.box, None),
+            DataWithAuxiliary(pos, input.aux, sign, input.box, None),
             ldj,
         )
 
@@ -434,7 +425,6 @@ def build_flow(
     key: KeyArray,
     num_molecules: int,
     use_auxiliary: bool,
-    ref_lattice: Molecules,
     specs: FlowSpecification,
 ) -> Pipe[DataWithAuxiliary, DataWithAuxiliary]:
     """Creates the final flow composed of:
@@ -458,8 +448,8 @@ def build_flow(
     couplings = LayerStackedPipe(blocks, use_scan=True)
     return Pipe(
         [
-            EuclideanToRigidTransform(ref_lattice),
+            EuclideanToRigidTransform(),
             couplings,
-            Inverted(EuclideanToRigidTransform(ref_lattice)),
+            Inverted(EuclideanToRigidTransform()),
         ]
     )

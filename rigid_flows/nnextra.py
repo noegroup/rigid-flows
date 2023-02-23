@@ -40,21 +40,21 @@ class PositionConditionerBlock(eqx.Module):
             use_bias=False,
             key=next(chain),
         )
-        n_types = 2 if num_aux is None else 3
+        n_types = 3  # 2 if num_aux is None else 3
         self.values = eqx.nn.Linear(
             node_dim, node_dim * num_heads * n_types, key=next(chain)
         )
 
     def __call__(self, nodes, aux, rot):
         seq_len = nodes.shape[0]  # same as node_dim
-        n_types = 2 if aux is None else 3
-
-        val = jax.vmap(self.values)(nodes).reshape(
-            seq_len, n_types * self.num_heads, -1
-        )
 
         nodes_k, nodes_q = jnp.split(
             jax.vmap(self.nodes_kq)(nodes).reshape(seq_len, self.num_heads, -1),
+            2,
+            -1,
+        )
+        rot_k, rot_q = jnp.split(
+            jax.vmap(self.rot_kq)(rot).reshape(seq_len, self.num_heads, -1),
             2,
             -1,
         )
@@ -64,18 +64,16 @@ class PositionConditionerBlock(eqx.Module):
                 2,
                 -1,
             )
-        rot_k, rot_q = jnp.split(
-            jax.vmap(self.rot_kq)(rot).reshape(seq_len, self.num_heads, -1),
-            2,
-            -1,
-        )
-
-        if aux is not None:
-            k = jnp.concatenate([nodes_k, aux_k, rot_k], axis=-2)
-            q = jnp.concatenate([nodes_q, aux_q, rot_q], axis=-2)
+            # k = jnp.concatenate([nodes_k, aux_k, rot_k], axis=-2)
+            # q = jnp.concatenate([nodes_q, aux_q, rot_q], axis=-2)
         else:
-            k = jnp.concatenate([nodes_k, rot_k], axis=-2)
-            q = jnp.concatenate([nodes_q, rot_q], axis=-2)
+            # k = jnp.concatenate([nodes_k, rot_k], axis=-2)
+            # q = jnp.concatenate([nodes_q, rot_q], axis=-2)
+            aux_k, aux_q = jnp.zeros_like(nodes_k), jnp.zeros_like(nodes_q)
+
+        k = jnp.concatenate([nodes_k, aux_k, rot_k], axis=-2)
+        q = jnp.concatenate([nodes_q, aux_q, rot_q], axis=-2)
+        val = jax.vmap(self.values)(nodes).reshape(seq_len, q.shape[-2], -1)
 
         logits = jnp.einsum("ihc, jhc -> ijh", k, q)
         logits = logits / jnp.sqrt(self.num_heads)
@@ -151,8 +149,6 @@ class AuxiliaryConditionerBlock(eqx.Module):
     def __call__(self, nodes, pos, rot):
         seq_len = nodes.shape[0]
 
-        val = jax.vmap(self.values)(nodes).reshape(seq_len, 3 * self.num_heads, -1)
-
         nodes_k, nodes_q = jnp.split(
             jax.vmap(self.nodes_kq)(nodes).reshape(seq_len, self.num_heads, -1),
             2,
@@ -172,6 +168,7 @@ class AuxiliaryConditionerBlock(eqx.Module):
 
         k = jnp.concatenate([nodes_k, pos_k, rot_k], axis=-2)
         q = jnp.concatenate([nodes_q, pos_q, rot_q], axis=-2)
+        val = jax.vmap(self.values)(nodes).reshape(seq_len, q.shape[-2], -1)
 
         logits = jnp.einsum("ihc, jhc -> ijh", k, q)
         logits = logits / jnp.sqrt(self.num_heads)
@@ -186,7 +183,9 @@ class AuxConditioner(eqx.Module):
     blocks: list[tuple[AuxiliaryConditionerBlock, eqx.nn.LayerNorm]]
     decoder: eqx.nn.Linear
 
-    def __init__(self, seq_len, out, num_heads, num_channels, num_blocks, *, key) -> None:
+    def __init__(
+        self, seq_len, out, num_heads, num_channels, num_blocks, *, key
+    ) -> None:
         chain = key_chain(key)
         self.blocks = [
             (
@@ -240,18 +239,13 @@ class RotationConditionerBlock(eqx.Module):
             )
         else:
             self.aux_kq = None
-        n_types = 2 if num_aux is None else 3
+        n_types = 3  # 2 if num_aux is None else 3
         self.values = eqx.nn.Linear(
-            node_dim, node_dim * num_heads * n_types, key=next(chain)
+            node_dim, node_dim * num_heads * 3, key=next(chain)
         )
 
     def __call__(self, nodes, pos, aux):
         seq_len = nodes.shape[0]
-        n_types = 2 if aux is None else 3
-
-        val = jax.vmap(self.values)(nodes).reshape(
-            seq_len, n_types * self.num_heads, -1
-        )
 
         nodes_k, nodes_q = jnp.split(
             jax.vmap(self.nodes_kq)(nodes).reshape(seq_len, self.num_heads, -1),
@@ -270,12 +264,16 @@ class RotationConditionerBlock(eqx.Module):
                 2,
                 -1,
             )
-
-            k = jnp.concatenate([nodes_k, pos_k, aux_k], axis=-2)
-            q = jnp.concatenate([nodes_q, pos_q, aux_q], axis=-2)
+            # k = jnp.concatenate([nodes_k, pos_k, aux_k], axis=-2)
+            # q = jnp.concatenate([nodes_q, pos_q, aux_q], axis=-2)
         else:
-            k = jnp.concatenate([nodes_k, pos_k], axis=-2)
-            q = jnp.concatenate([nodes_q, pos_q], axis=-2)
+            # k = jnp.concatenate([nodes_k, pos_k], axis=-2)
+            # q = jnp.concatenate([nodes_q, pos_q], axis=-2)
+            aux_k, aux_q = jnp.zeros_like(nodes_k), jnp.zeros_like(nodes_q)
+
+        k = jnp.concatenate([nodes_k, pos_k, aux_k], axis=-2)
+        q = jnp.concatenate([nodes_q, pos_q, aux_q], axis=-2)
+        val = jax.vmap(self.values)(nodes).reshape(seq_len, q.shape[-2], -1)
 
         logits = jnp.einsum("ihc, jhc -> ijh", k, q)
         logits = logits / jnp.sqrt(self.num_heads)

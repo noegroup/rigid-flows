@@ -20,7 +20,7 @@ model:
   # set if model is trained with warm start
   pretrained_model_path: null # runs/2022-12-13_19:18:20/training_stage_0/epoch_1/model.eqx 
 
-  use_auxiliary: true
+  use_auxiliary: false
 
   # definition of the flow model
   flow:

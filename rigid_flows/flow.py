@@ -23,12 +23,14 @@ from .system import QUATERNION_DIM, SPATIAL_DIM, SimulationBox
 
 KeyArray = jnp.ndarray | jax.random.PRNGKeyArray
 Atoms = Float[Array, "... MOL SITES SPATIAL_DIM"]
+PosArray = Float[Array, "... SPATIAL_DIM"]
+QuatArray = Float[Array, "... QUATERNION_DIM"]
 
 MOEBIUS_SLACK = 0.95
 IDENTITY_GATE = 3.0
 
 
-def PosEncoder(pos, box: SimulationBox):
+def PosEncoder(pos: PosArray, box: SimulationBox):
     rad = pos / box.size
     enc_pos = jnp.stack(
         [
@@ -40,30 +42,16 @@ def PosEncoder(pos, box: SimulationBox):
     return enc_pos
 
 
-def PosDecoder(enc_pos, box: SimulationBox):
+def PosDecoder(enc_pos, box: SimulationBox) -> PosArray:
     pos = jnp.arctan2(enc_pos[..., 1], enc_pos[..., 0])
     pos = (pos + jnp.pi) / (2 * jnp.pi)
     return pos * box.size
 
 
-# class QuatEncoder(eqx.Module):
-#     """Encodes a quaternion into a flip-invariant representation."""
-
-#     encoder: eqx.nn.Linear
-
-#     def __init__(self, num_out: int, *, key: KeyArray):
-#         """Encodes a quaternion into a flip-invariant representation.
-#         Args:
-#             num_out (int): number of dimensions of output representation.
-#             key (KeyArray): PRNG Key for layer initialization
-#         """
-#         self.encoder = eqx.nn.Linear(4, num_out + 1, key=key)
-
-#     def __call__(self, quat: Quaternion) -> Quaternion:
-#         inp = jnp.stack([quat, -quat])
-#         out = jax.vmap(jax.vmap(self.encoder))(inp)
-#         weight = jax.nn.softmax(out[..., 0], axis=0)
-#         return (weight[..., None] * out[..., 1:]).sum(axis=0)
+def QuatEncoder(rot: QuatArray):
+    """Encodes a quaternion into a flip-invariant representation."""
+    rot = rot * jnp.sign(rot[..., :1])
+    return rot
 
 
 class RigidTransform(Transform[Atoms, Rigid]):
@@ -250,7 +238,8 @@ class AuxUpdate(eqx.Module):
         enc_pos = PosEncoder(input.rigid.pos, input.box).reshape(
             (*input.rigid.pos.shape[:-1], 2 * SPATIAL_DIM)
         )
-        out = self.net(enc_pos, input.rigid.rot).reshape(input.aux.shape[0], -1)
+        out = self.net(enc_pos, QuatEncoder(input.rigid.rot))
+        out = out.reshape(input.aux.shape[0], -1)
         out, gate = jnp.split(out, 2, axis=-1)
         out = out * jax.nn.sigmoid(gate - IDENTITY_GATE)
 
@@ -304,14 +293,15 @@ class PosUpdate(eqx.Module):
         )
 
     def params(self, input: RigidWithAuxiliary):
-        out = self.net(input.aux, input.rigid.rot)
+        out = self.net(input.aux, QuatEncoder(input.rigid.rot))
         out = out.reshape(*input.rigid.pos.shape, -1)
 
         reflection, gate = jnp.split(out, 2, axis=-1)
         reflection = reflection * jax.nn.sigmoid(gate - 2 * IDENTITY_GATE)
         reflection = reflection.reshape(*input.rigid.pos.shape, 2)
 
-        reflection.at[0].multiply(0)  # do not move the first molecule
+        reflection = reflection[1:]  # quick fix to not move the first molecule
+
         reflection = jax.vmap(
             jax.vmap(lambda x: x / (1 + geom.norm(x)) * MOEBIUS_SLACK)
         )(reflection)
@@ -325,9 +315,10 @@ class PosUpdate(eqx.Module):
         def trasfo(ref, enc_pos):
             return Moebius(ref).forward(enc_pos)
 
-        enc_pos = PosEncoder(input.rigid.pos, input.box)
+        enc_pos = PosEncoder(input.rigid.pos[1:], input.box)
         enc_pos, ldj = unpack(jax.vmap(trasfo)(reflection, enc_pos))
         pos = PosDecoder(enc_pos, input.box)
+        pos = jnp.concatenate([input.rigid.pos[:1], pos])
 
         ldj = jnp.sum(ldj)
         output = lenses.bind(input).rigid.pos.set(pos)
@@ -342,9 +333,10 @@ class PosUpdate(eqx.Module):
         def trasfo(ref, enc_pos):
             return Moebius(ref).inverse(enc_pos)
 
-        enc_pos = PosEncoder(input.rigid.pos, input.box)
+        enc_pos = PosEncoder(input.rigid.pos[1:], input.box)
         enc_pos, ldj = unpack(jax.vmap(trasfo)(reflection, enc_pos))
         pos = PosDecoder(enc_pos, input.box)
+        pos = jnp.concatenate([input.rigid.pos[:1], pos])
 
         ldj = jnp.sum(ldj)
         output = lenses.bind(input).rigid.pos.set(pos)

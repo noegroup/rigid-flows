@@ -7,8 +7,7 @@ from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 
-from .system import (ErrorHandling, OpenMMEnergyModel, SimulationBox,
-                     SystemSpecification)
+from .system import ErrorHandling, OpenMMEnergyModel, SimulationBox, SystemSpecification
 
 logger = logging.getLogger("rigid-flows")
 
@@ -91,7 +90,7 @@ class PreprocessedData:
         pos = pos - pos[:, :1, :1]
 
         ## put molecules back into PBC (without breaiking them)
-        shift = (pos[:,:,:1] % data.box) - pos[:,:,:1]
+        shift = (pos[:, :, :1] % data.box) - pos[:, :, :1]
         pos = pos + shift
 
         return PreprocessedData(pos, data.box, data.energy, data.force)

@@ -50,7 +50,7 @@ def PosDecoder(enc_pos, box: SimulationBox) -> PosArray:
 
 def QuatEncoder(rot: QuatArray):
     """Encodes a quaternion into a flip-invariant representation."""
-    rot = rot * jnp.sign(rot[..., :1])
+    # rot = rot * jnp.sign(rot[..., :1])
     return rot
 
 

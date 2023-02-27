@@ -79,15 +79,8 @@ class PreprocessedData:
     @staticmethod
     def from_data(data: Data) -> "PreprocessedData":
 
-        ## unwrap positions with respect to first frame
-        pos = jnp.where(
-            jnp.abs(data.pos - data.pos[0]) / data.box > 0.5,
-            data.pos - jnp.sign(data.pos - data.pos[0]) * data.box,
-            data.pos,
-        )
-
         ## remove global translation using first molecule
-        pos = pos - pos[:, :1, :1]
+        pos = data.pos - data.pos[:,:1,:1]
 
         ## put molecules back into PBC (without breaiking them)
         shift = (pos[:, :, :1] % data.box) - pos[:, :, :1]

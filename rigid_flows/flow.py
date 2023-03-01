@@ -122,6 +122,7 @@ class QuatUpdate(eqx.Module):
     """Flow layer updating the quaternion part of a state"""
 
     net: RotConditioner
+    # net: eqx.nn.MLP
 
     def __init__(
         self,
@@ -140,6 +141,14 @@ class QuatUpdate(eqx.Module):
             num_aux = SPATIAL_DIM
         else:
             num_aux = None
+        #     num_aux = 0
+        # self.net = eqx.nn.MLP(
+        #     seq_len * (num_aux +  2 * SPATIAL_DIM),
+        #     seq_len * 2 * num_out,
+        #     width_size=128,
+        #     depth=2,
+        #     key=next(chain),
+        # )
         self.net = RotConditioner(
             seq_len,
             2 * num_out,
@@ -162,6 +171,8 @@ class QuatUpdate(eqx.Module):
         enc_pos = PosEncoder(input.rigid.pos, input.box).reshape(
             (*input.rigid.pos.shape[:-1], 2 * SPATIAL_DIM)
         )
+
+        # out = self.net(enc_pos.flatten())
         out = self.net(enc_pos, input.aux)
 
         reflection, gate = jnp.split(out, 2, axis=-1)
@@ -264,6 +275,7 @@ class AuxUpdate(eqx.Module):
 class PosUpdate(eqx.Module):
 
     net: PosConditioner
+    # net: eqx.nn.MLP
 
     def __init__(
         self,
@@ -276,11 +288,20 @@ class PosUpdate(eqx.Module):
     ):
         chain = key_chain(key)
 
+        num_out = SPATIAL_DIM * 2
         if use_auxiliary:
             num_aux = SPATIAL_DIM
         else:
             num_aux = None
-        num_out = SPATIAL_DIM * 2
+        #     num_aux = 0
+
+        # self.net = eqx.nn.MLP(
+        #     in_size=seq_len * (num_aux + QUATERNION_DIM),
+        #     out_size=seq_len * 2 * num_out,
+        #     width_size=128,
+        #     depth=2,
+        #     key=next(chain),
+        # )
 
         self.net = PosConditioner(
             seq_len,
@@ -293,6 +314,7 @@ class PosUpdate(eqx.Module):
         )
 
     def params(self, input: RigidWithAuxiliary):
+        # out = self.net(QuatEncoder(input.rigid.rot).flatten())
         out = self.net(input.aux, QuatEncoder(input.rigid.rot))
         out = out.reshape(*input.rigid.pos.shape, -1)
 

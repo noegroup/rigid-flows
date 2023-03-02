@@ -24,11 +24,12 @@ logdir_path = sys.argv[1]
 stage = 0
 epoch = 9
 
-num_eval_samples = 100_000
+num_eval_samples = 10_000
 num_iterations = 10
-num_samples = 50_000 #num_eval_samples // num_iterations
+num_samples = num_eval_samples
 
-stop_for_plots = True
+stop_for_plots = False
+override_stats = True
 n_sigmas = 2 #errorbars are n_sigmas wide
 
 print(f"+++ trainng stage {stage}, epoch {epoch} +++")
@@ -37,7 +38,7 @@ pretrained_model_path = f"{logdir_path}/training_stage_{stage}/epoch_{epoch}/mod
 print(pretrained_model_path)
 
 specs = ExperimentSpecification.load_from_file(specs_path)
-specs = lenses.bind(specs).model.base.path.set(specs.model.base.path + "/eval_100")
+specs = lenses.bind(specs).model.base.path.set(specs.model.base.path + "/eval_10")
 selection = np.s_[-num_eval_samples:]
 
 base = OpenMMDensity.from_specs(specs.model.use_auxiliary, specs.model.base, selection)
@@ -67,7 +68,8 @@ flow = cast(
 training_data_size = 100_000 if specs.model.base.num_samples is None else specs.model.base.num_samples
 print(f"tot flow parameters: {count_params(flow):_}")
 print(f"MD training datapoints = {training_data_size:_}")
-print(f"MD eval datapoints = {base.data.pos.shape[0]:_}")
+num_eval_samples = min(num_eval_samples, base.data.pos.shape[0])
+print(f"MD eval datapoints = {num_eval_samples:_}")
 print(f"batchs per epoch = {specs.train[0].num_iters_per_epoch}")
 print(f"batch size = {specs.train[0].num_samples}")
 print(f"data fraction: {specs.train[0].num_epochs*specs.train[0].num_samples*specs.train[0].num_iters_per_epoch/training_data_size}")
@@ -92,7 +94,6 @@ def plot_results(
     ESSs=None,
     num_samples=num_samples,
     std_deltaFs=None,
-    stop_for_plots=stop_for_plots,
 ):
     if ESSs is not None:
         plt.plot(ESSs / num_samples * 100, "-o", label="forward")
@@ -138,9 +139,12 @@ except FileNotFoundError:
     print('no LFEPstats found')
 
 if stats_found:
-    print('LFEPstats found, sure you want to recalculate them?')
-    plot_results(**stats, stop_for_plots=True)
-    # raise SystemError('LFEPstats found, sure you want to recalculate them?')
+    print('LFEPstats found:')
+    if override_stats:
+        print('    +++ they will be overwritten! +++')
+    else:
+        plot_results(**stats)
+        sys.exit('keeping the current stats')
 
 
 batch_size = 64

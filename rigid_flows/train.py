@@ -184,7 +184,7 @@ def update_fn(
             .modify(lambda node: jax.tree_map(lambda x: jnp.zeros_like(x), node))
         )
 
-        updates, opt_state = optim.update(grad, opt_state)  # type: ignore
+        updates, opt_state = optim.update(grad, opt_state, eqx.filter(flow, eqx.is_array))  # type: ignore
         flow = cast(
             Transform[DataWithAuxiliary, DataWithAuxiliary],
             eqx.apply_updates(flow, updates),
@@ -202,6 +202,8 @@ def train_fn(
 ):
     params = eqx.filter(flow, eqx.is_array)
     optim = optax.adam(get_scheduler(specs))
+    if specs.grad_clipping_ratio is not None:
+        optim = optax.chain(optax.adaptive_grad_clip(specs.grad_clipping_ratio), optim)
 
     opt_state = optim.init(params)  # type: ignore
 

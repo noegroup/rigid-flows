@@ -6,25 +6,24 @@ global_step: 0
 reporting:
   num_samples: 1000 # null for no reporting
   num_samples_per_batch: 32
-  plot_quaternions: null
-  plot_oxygens: false
-  plot_energy_histograms: false
+  
   report_ess: true
   report_likelihood: false
+
   save_model: true
   save_samples: false
   save_statistics: false
 
-model:
+  plot_quaternions: null
+  plot_oxygens: false
+  plot_energy_histograms: false
 
-  # set if model is trained with warm start
-  pretrained_model_path: null # runs/2022-12-13_19:18:20/training_stage_0/epoch_1/model.eqx 
+model:
+  pretrained_model_path: null
 
   use_auxiliary: false
 
-  # definition of the flow model
   flow:
-    # coupling layers
     couplings:
       - num_repetitions: 4
         auxiliary_update:
@@ -46,14 +45,14 @@ model:
     temperature: 250
     ice_type: XI
     water_type: tip4pew
+    num_samples: 10_000
+
+    fixed_box: true
     recompute_forces: false
     store_forces: false
     forces_path: null
-    fixed_box: true
-    num_samples: 10_000
-
-    softcore_cutoff: null # 0.9
-    softcore_potential: null # "linear"
+    softcore_cutoff: null
+    softcore_potential: null
     softcore_slope: 2.
 
   target:
@@ -62,42 +61,33 @@ model:
     temperature: 100
     ice_type: XI
     water_type: tip4pew
+    num_samples: 10_000
+
+    fixed_box: true
     recompute_forces: false
     store_forces: false
     forces_path: null
-    fixed_box: true
-    num_samples: 10_000
-
-    softcore_cutoff: null # 0.9
-    softcore_potential: null # "linear"
+    softcore_cutoff: null
+    softcore_potential: null
     softcore_slope: 2.
 
-# training definition
 train:
-
-  # first stage: only likelihood
   - num_epochs: 3
     num_iters_per_epoch: 1000
+    num_samples: 32
 
     init_learning_rate: 5e-3
     target_learning_rate: 5e-4
 
-    weight_nll: 0.
-
-    weight_fm_model: 0.
-    fm_model_perturbation_noise: 0
-    weight_fm_target: 0
-    fm_target_perturbation_noise: 0
-    fm_ignore_charge_site: true
-
     weight_fe: 1.
+    weight_nll: 0.
 
     weight_vg_model: 0.
     weight_vg_target: 0.
-  
-    num_samples: 32
+    weight_fm_model: 0.
+    weight_fm_target: 0
+    fm_model_perturbation_noise: 0
+    fm_target_perturbation_noise: 0
+    fm_ignore_charge_site: true
 
-    use_grad_clipping: false
-    grad_clipping_ratio: 1.
-
-    apply_if_finite_trials: 100
+    grad_clipping_ratio: null #1.

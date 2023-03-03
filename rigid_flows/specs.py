@@ -42,23 +42,24 @@ class FlowSpecification:
 class TrainingSpecification:
     num_epochs: int
     num_iters_per_epoch: int
+    num_samples: int
+
     init_learning_rate: float
     target_learning_rate: float
+
     weight_nll: float
-    weight_fm_model: float
-    weight_fm_target: float
     weight_fe: float
+
     weight_vg_model: float
     weight_vg_target: float
 
+    weight_fm_model: float
+    weight_fm_target: float
     fm_model_perturbation_noise: float
     fm_target_perturbation_noise: float
     fm_ignore_charge_site: bool
 
-    num_samples: int
-    use_grad_clipping: bool
-    grad_clipping_ratio: float
-    apply_if_finite_trials: int
+    grad_clipping_ratio: float | None
 
     @property
     def num_iterations(self):

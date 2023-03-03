@@ -41,7 +41,7 @@ model:
       
   base:
     path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"
-    num_molecules: 16
+    num_molecules: 128
     temperature: 250
     ice_type: XI
     water_type: tip4pew
@@ -57,7 +57,7 @@ model:
 
   target:
     path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"
-    num_molecules: 16
+    num_molecules: 128
     temperature: 100
     ice_type: XI
     water_type: tip4pew

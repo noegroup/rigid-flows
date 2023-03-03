@@ -158,6 +158,15 @@ class QuatUpdate(eqx.Module):
             num_blocks,
             key=next(chain),
         )
+        # self.net = Conditioner(
+        #     seq_len,
+        #     (num_aux + 2 * SPATIAL_DIM),
+        #     2 * num_out,
+        #     num_heads,
+        #     num_channels,
+        #     num_blocks,
+        #     key=next(chain),
+        # )
 
     def params(self, input: RigidWithAuxiliary):
         """Compute the parameters for the double moebius transform

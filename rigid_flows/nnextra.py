@@ -5,6 +5,10 @@ from flox.util import key_chain
 
 from .system import QUATERNION_DIM, SPATIAL_DIM
 
+MLP_WIDTH_SIZE = 128
+MLP_WIDTH_MULT = 2
+MLP_DEPTH = 2
+
 
 class PositionConditionerBlock(eqx.Module):
 
@@ -86,7 +90,7 @@ class PositionConditionerBlock(eqx.Module):
 class PosConditioner(eqx.Module):
 
     blocks: list[tuple[PositionConditionerBlock, eqx.nn.LayerNorm]]
-    decoder: eqx.nn.Linear
+    decoder: eqx.nn.Sequential
 
     def __init__(
         self, seq_len, out, num_aux, num_heads, num_channels, num_blocks, *, key
@@ -97,7 +101,6 @@ class PosConditioner(eqx.Module):
                 PositionConditionerBlock(
                     seq_len, num_aux, num_heads, num_channels, key=next(chain)
                 ),
-                # eqx.nn.MultiheadAttention(num_heads, seq_len*num_channels, ???, key=key),
                 eqx.nn.LayerNorm((seq_len,), elementwise_affine=True),
             )
             for _ in range(num_blocks)
@@ -106,7 +109,7 @@ class PosConditioner(eqx.Module):
         self.decoder = eqx.nn.Sequential(
             [
                 eqx.nn.LayerNorm((seq_len,), elementwise_affine=True),
-                eqx.nn.Linear(seq_len, out, use_bias=True, key=next(chain)),
+                eqx.nn.MLP(seq_len, out, width_size=seq_len*MLP_WIDTH_MULT, depth=MLP_DEPTH, key=next(chain)),
             ]
         )
 
@@ -175,6 +178,7 @@ class AuxiliaryConditionerBlock(eqx.Module):
                 jnp.square(logits[..., -self.num_heads :])
             )
         logits = logits / jnp.sqrt(self.num_heads)
+        
         att = jax.nn.softmax(logits, axis=-2)
         out = jnp.einsum("ijh, jhd -> id", att, val)
 
@@ -184,7 +188,7 @@ class AuxiliaryConditionerBlock(eqx.Module):
 class AuxConditioner(eqx.Module):
 
     blocks: list[tuple[AuxiliaryConditionerBlock, eqx.nn.LayerNorm]]
-    decoder: eqx.nn.Linear
+    decoder: eqx.nn.Sequential
 
     def __init__(
         self, seq_len, out, num_heads, num_channels, num_blocks, *, key
@@ -202,7 +206,7 @@ class AuxConditioner(eqx.Module):
         self.decoder = eqx.nn.Sequential(
             [
                 eqx.nn.LayerNorm((seq_len,), elementwise_affine=True),
-                eqx.nn.Linear(seq_len, out, use_bias=True, key=next(chain)),
+                eqx.nn.MLP(seq_len, out, width_size=seq_len*MLP_WIDTH_MULT, depth=MLP_DEPTH, key=next(chain)),
             ]
         )
 
@@ -303,7 +307,7 @@ class RotConditioner(eqx.Module):
         self.decoder = eqx.nn.Sequential(
             [
                 eqx.nn.LayerNorm((seq_len,), elementwise_affine=True),
-                eqx.nn.Linear(seq_len, out, use_bias=True, key=next(chain)),
+                eqx.nn.MLP(seq_len, out, width_size=seq_len*MLP_WIDTH_MULT, depth=MLP_DEPTH, key=next(chain)),
             ]
         )
 

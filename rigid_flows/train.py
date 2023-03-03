@@ -61,51 +61,6 @@ TotLossFun = Callable[
 ]
 
 
-def force_matching_loss_fn(
-    key: KeyArray,
-    base: Potential[DataWithAuxiliary],
-    source: Sampler[DataWithAuxiliary],
-    omm_energy_model: OpenMMEnergyModel,
-    num_samples: int,
-    perturbation_noise: float,
-    ignore_charge_site: bool,
-) -> LossFun:
-    chain = key_chain(key)
-    keys = jax.random.split(next(chain), num_samples)
-    samples = jax.vmap(source)(keys).obj
-    if perturbation_noise > 0:
-        samples = lenses.bind(samples).pos.set(
-            samples.pos
-            + perturbation_noise * jax.random.normal(next(chain), samples.pos.shape)
-        )
-    _, omm_forces = wrap_openmm_model(omm_energy_model)[1](samples.pos, None, True)
-
-    num_atoms = prod(samples.pos.shape[1:])
-    if ignore_charge_site:
-        assert omm_energy_model.model.n_sites == 4
-        mask = (jnp.arange(num_atoms) % 4) != 3
-        mask = jnp.tile(mask[None], (num_samples, 1))
-    else:
-        mask = jnp.ones((num_samples, num_atoms))
-
-    def evaluate(flow: Transform[DataWithAuxiliary, DataWithAuxiliary]) -> Array:
-        flow_grads = jax.vmap(jax.grad(PushforwardPotential(base, flow)))(samples)
-        mse = 0
-        mse += jnp.mean(
-            jnp.square(
-                -(
-                    flow_grads.pos.reshape(num_samples, -1)
-                    - omm_forces.reshape(num_samples, -1)
-                )
-                * mask
-            )
-        )
-        mse += jnp.mean(jnp.square(flow_grads.aux - samples.aux))
-        return mse
-
-    return evaluate
-
-
 def kullback_leiber_divergence_fn(
     key: KeyArray,
     base: DensityModel[DataWithAuxiliary],
@@ -122,26 +77,6 @@ def kullback_leiber_divergence_fn(
         else:
             out = jax.vmap(PullbackSampler(target.sample, flow))(keys)
             return jnp.mean(jax.vmap(base.potential)(out.obj) - out.ldj)
-
-    return evaluate
-
-
-def var_grad_loss_fn(
-    key: KeyArray,
-    sampler: Sampler[DataWithAuxiliary],
-    base: Potential[DataWithAuxiliary],
-    target: Potential[DataWithAuxiliary],
-    num_samples: int,
-) -> LossFun:
-
-    keys = jax.random.split(key, num_samples)
-
-    samples = jax.lax.stop_gradient(jax.vmap(sampler)(keys).obj)
-
-    def evaluate(flow: Transform[DataWithAuxiliary, DataWithAuxiliary]) -> Array:
-        flow_energies = jax.vmap(PushforwardPotential(base, flow))(samples)
-        target_energies = jax.vmap(target)(samples)
-        return jnp.var(flow_energies - target_energies)
 
     return evaluate
 
@@ -239,66 +174,6 @@ def train_fn(
                     specs.weight_nll,
                 )
             )
-        if specs.weight_fm_model > 0:
-            partial_loss_fns.append(
-                Loss(
-                    "force_matching_model_samples",
-                    force_matching_loss_fn(
-                        key=next(chain),
-                        base=base.potential,
-                        source=PullbackSampler(base.sample, flow),
-                        omm_energy_model=target.omm_model,
-                        num_samples=specs.num_samples,
-                        perturbation_noise=specs.fm_model_perturbation_noise,
-                        ignore_charge_site=specs.fm_ignore_charge_site,
-                    ),
-                    specs.weight_fm_model,
-                )
-            )
-        if specs.weight_fm_target > 0:
-            partial_loss_fns.append(
-                Loss(
-                    "force_matching_target_samples",
-                    force_matching_loss_fn(
-                        key=next(chain),
-                        base=base.potential,
-                        source=target.sample,
-                        omm_energy_model=target.omm_model,
-                        num_samples=specs.num_samples,
-                        perturbation_noise=specs.fm_target_perturbation_noise,
-                        ignore_charge_site=specs.fm_ignore_charge_site,
-                    ),
-                    specs.weight_fm_target,
-                )
-            )
-        if specs.weight_vg_model > 0:
-            partial_loss_fns.append(
-                Loss(
-                    "var_grad_model_samples",
-                    var_grad_loss_fn(
-                        key=next(chain),
-                        sampler=PullbackSampler(base.sample, flow),
-                        target=target.potential,
-                        base=base.potential,
-                        num_samples=specs.num_samples,
-                    ),
-                    specs.weight_vg_model,
-                )
-            )
-        if specs.weight_vg_target > 0:
-            partial_loss_fns.append(
-                Loss(
-                    "var_grad_target_samples",
-                    var_grad_loss_fn(
-                        key=next(chain),
-                        sampler=target.sample,
-                        target=target.potential,
-                        base=base.potential,
-                        num_samples=specs.num_samples,
-                    ),
-                    specs.weight_vg_target,
-                )
-            )
         return total_loss_fn(partial_loss_fns)
 
     def train_step(
@@ -332,12 +207,6 @@ def run_training_stage(
     with jit_and_cleanup_cache(train_step) as step:
         for num_epoch in range(training_specs.num_epochs):
 
-            target.omm_model.set_softcore_cutoff(
-                system_specs.softcore_cutoff,
-                system_specs.softcore_potential,
-                system_specs.softcore_slope,
-            )
-
             epoch_reporter = reporter.with_scope(f"epoch_{num_epoch}")
             pbar = tqdm(
                 range(training_specs.num_iters_per_epoch),
@@ -359,8 +228,6 @@ def run_training_stage(
                     tot_iter,
                 )
                 tot_iter += 1
-
-            target.omm_model.set_softcore_cutoff(None)
 
             epoch_reporter.report_model(next(chain), flow, tot_iter)
     return flow

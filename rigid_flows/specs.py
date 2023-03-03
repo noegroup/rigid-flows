@@ -45,20 +45,9 @@ class TrainingSpecification:
     init_learning_rate: float
     target_learning_rate: float
     weight_nll: float
-    weight_fm_model: float
-    weight_fm_target: float
     weight_fe: float
-    weight_vg_model: float
-    weight_vg_target: float
-
-    fm_model_perturbation_noise: float
-    fm_target_perturbation_noise: float
-    fm_ignore_charge_site: bool
 
     num_samples: int
-    use_grad_clipping: bool
-    grad_clipping_ratio: float
-    apply_if_finite_trials: int
 
     @property
     def num_iterations(self):
@@ -71,15 +60,6 @@ class SystemSpecification:
     num_molecules: int
     temperature: int
     ice_type: str
-    recompute_forces: bool
-    store_forces: bool
-    forces_path: str | None
-    fixed_box: bool
-
-    softcore_cutoff: float | None
-    softcore_potential: str | None
-    softcore_slope: float | None
-
     water_type: str = "tip4pew"
 
     num_samples: int | None = None

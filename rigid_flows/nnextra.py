@@ -97,7 +97,6 @@ class PosConditioner(eqx.Module):
                 PositionConditionerBlock(
                     seq_len, num_aux, num_heads, num_channels, key=next(chain)
                 ),
-                # eqx.nn.MultiheadAttention(num_heads, seq_len*num_channels, ???, key=key),
                 eqx.nn.LayerNorm((seq_len,), elementwise_affine=True),
             )
             for _ in range(num_blocks)

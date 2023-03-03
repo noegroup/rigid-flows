@@ -48,12 +48,6 @@ def PosDecoder(enc_pos, box: SimulationBox) -> PosArray:
     return pos * box.size
 
 
-def QuatEncoder(rot: QuatArray):
-    """Encodes a quaternion into a flip-invariant representation."""
-    # rot = rot * jnp.sign(rot[..., :1])
-    return rot
-
-
 class RigidTransform(Transform[Atoms, Rigid]):
     def forward(self, inp: Atoms) -> Transformed[Rigid]:
         rigid = Rigid.from_array(inp)
@@ -122,7 +116,6 @@ class QuatUpdate(eqx.Module):
     """Flow layer updating the quaternion part of a state"""
 
     net: RotConditioner
-    # net: eqx.nn.MLP
 
     def __init__(
         self,
@@ -141,14 +134,7 @@ class QuatUpdate(eqx.Module):
             num_aux = SPATIAL_DIM
         else:
             num_aux = None
-        #     num_aux = 0
-        # self.net = eqx.nn.MLP(
-        #     seq_len * (num_aux +  2 * SPATIAL_DIM),
-        #     seq_len * 2 * num_out,
-        #     width_size=128,
-        #     depth=2,
-        #     key=next(chain),
-        # )
+
         self.net = RotConditioner(
             seq_len,
             2 * num_out,
@@ -172,7 +158,6 @@ class QuatUpdate(eqx.Module):
             (*input.rigid.pos.shape[:-1], 2 * SPATIAL_DIM)
         )
 
-        # out = self.net(enc_pos.flatten())
         out = self.net(enc_pos, input.aux)
 
         reflection, gate = jnp.split(out, 2, axis=-1)
@@ -249,7 +234,7 @@ class AuxUpdate(eqx.Module):
         enc_pos = PosEncoder(input.rigid.pos, input.box).reshape(
             (*input.rigid.pos.shape[:-1], 2 * SPATIAL_DIM)
         )
-        out = self.net(enc_pos, QuatEncoder(input.rigid.rot))
+        out = self.net(enc_pos, input.rigid.rot)
         out = out.reshape(input.aux.shape[0], -1)
         out, gate = jnp.split(out, 2, axis=-1)
         out = out * jax.nn.sigmoid(gate - IDENTITY_GATE)
@@ -275,7 +260,6 @@ class AuxUpdate(eqx.Module):
 class PosUpdate(eqx.Module):
 
     net: PosConditioner
-    # net: eqx.nn.MLP
 
     def __init__(
         self,
@@ -293,15 +277,6 @@ class PosUpdate(eqx.Module):
             num_aux = SPATIAL_DIM
         else:
             num_aux = None
-        #     num_aux = 0
-
-        # self.net = eqx.nn.MLP(
-        #     in_size=seq_len * (num_aux + QUATERNION_DIM),
-        #     out_size=seq_len * 2 * num_out,
-        #     width_size=128,
-        #     depth=2,
-        #     key=next(chain),
-        # )
 
         self.net = PosConditioner(
             seq_len,
@@ -314,8 +289,7 @@ class PosUpdate(eqx.Module):
         )
 
     def params(self, input: RigidWithAuxiliary):
-        # out = self.net(QuatEncoder(input.rigid.rot).flatten())
-        out = self.net(input.aux, QuatEncoder(input.rigid.rot))
+        out = self.net(input.aux, input.rigid.rot)
         out = out.reshape(*input.rigid.pos.shape, -1)
 
         reflection, gate = jnp.split(out, 2, axis=-1)
@@ -381,7 +355,7 @@ class EuclideanToRigidTransform(equinox.Module):
         ldj = jnp.zeros(())
         sign = jnp.sign(input.rigid.rot[:, (0,)])
         return Transformed(
-            DataWithAuxiliary(pos, input.aux, sign, input.box, None),
+            DataWithAuxiliary(pos, input.aux, sign, input.box),
             ldj,
         )
 

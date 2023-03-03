@@ -19,7 +19,6 @@ class Data:
     pos: jnp.ndarray
     box: jnp.ndarray
     energy: jnp.ndarray
-    force: jnp.ndarray | None = None
 
     @staticmethod
     def from_specs(
@@ -41,31 +40,9 @@ class Data:
             ),
             box=jax.vmap(jnp.diag)(raw["box"][selection]),
             energy=raw["ene"][selection],
-            force=None,
         )
 
         return data
-
-    def recompute_forces(self, model: OpenMMEnergyModel):
-        _, forces = model.compute_energies_and_forces(
-            np.array(self.pos),
-            np.diag(np.array(self.box[0])),
-            error_handling=ErrorHandling.RaiseException,
-        )
-        return Data(
-            pos=self.pos,
-            box=self.box,
-            energy=self.energy,
-            force=jnp.array(forces),
-        )
-
-    def add_forces(self, forces):
-        return Data(
-            pos=self.pos,
-            box=self.box,
-            energy=self.energy,
-            force=jnp.array(forces).reshape(self.pos.shape),
-        )
 
 
 @pytree_dataclass(frozen=True)
@@ -74,19 +51,18 @@ class PreprocessedData:
     pos: jnp.ndarray
     box: jnp.ndarray
     energy: jnp.ndarray
-    force: jnp.ndarray | None
 
     @staticmethod
     def from_data(data: Data) -> "PreprocessedData":
 
         ## remove global translation using first molecule
-        pos = data.pos - data.pos[:,:1,:1]
+        pos = data.pos - data.pos[:, :1, :1]
 
         ## put molecules back into PBC (without breaiking them)
         shift = (pos[:, :, :1] % data.box) - pos[:, :, :1]
         pos = pos + shift
 
-        return PreprocessedData(pos, data.box, data.energy, data.force)
+        return PreprocessedData(pos, data.box, data.energy)
 
 
 @pytree_dataclass(frozen=True)
@@ -97,4 +73,3 @@ class DataWithAuxiliary:
     aux: Array | None
     sign: Array
     box: SimulationBox
-    force: jnp.ndarray | None

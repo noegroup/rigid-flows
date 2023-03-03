@@ -47,7 +47,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
         if stored_energies:
             self.omm_energies = self.compute_energies(
-                DataWithAuxiliary(self.data.pos, None, jnp.array([]), self.box, None),
+                DataWithAuxiliary(self.data.pos, None, jnp.array([]), self.box),
                 omm=True,
                 aux=False,
                 has_batch_dim=True,
@@ -75,9 +75,6 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
 
         results = {}
         if omm:
-            if not self.sys_specs.fixed_box:
-                raise NotImplementedError()
-
             energy = partial(
                 wrap_openmm_model(self.omm_model)[0],
                 box=None,
@@ -134,12 +131,11 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         else:
             aux = self.aux_model.sample(seed=next(chain))
 
-        force = None
         sign = jnp.sign(
             jax.random.normal(next(chain), shape=(self.sys_specs.num_molecules, 1))
         )
 
-        sample = DataWithAuxiliary(pos, aux, sign, self.box, force)
+        sample = DataWithAuxiliary(pos, aux, sign, self.box)
         if self.omm_energies is not None:
             energy = self.omm_energies[idx]
             if self.aux_model is not None:
@@ -162,22 +158,8 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
     ):
 
         omm_model = OpenMMEnergyModel.from_specs(sys_specs)
-        omm_model.set_softcore_cutoff(
-            sys_specs.softcore_cutoff,
-            sys_specs.softcore_potential,
-            sys_specs.softcore_slope,
-        )
 
         data = Data.from_specs(sys_specs, omm_model, selection)
-        if sys_specs.recompute_forces:
-            data = data.recompute_forces(omm_model)
-        elif sys_specs.forces_path:
-            forces = np.load(sys_specs.forces_path)["forces"]
-            data = data.add_forces(forces)
-        if sys_specs.store_forces and sys_specs.forces_path:
-            assert data.force is not None
-            np.savez(sys_specs.forces_path, forces=np.array(data.force))
-
         data = PreprocessedData.from_data(data)
 
         if use_auxiliary:

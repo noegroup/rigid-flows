@@ -142,7 +142,7 @@ def train_fn(
 
     def init_losses(
         key: KeyArray,
-        flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
+        # flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
     ) -> TotLossFun:
         chain = key_chain(key)
         partial_loss_fns = []
@@ -181,7 +181,7 @@ def train_fn(
         flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
         opt_state: OptState,
     ):
-        loss_fn = init_losses(key, flow)
+        loss_fn = init_losses(key)#, flow)
         return update_fn(optim, loss_fn)(flow, opt_state)
 
     return opt_state, train_step
@@ -193,7 +193,7 @@ def run_training_stage(
     target: OpenMMDensity,
     flow: Flow,
     training_specs: TrainingSpecification,
-    system_specs: SystemSpecification,
+    # system_specs: SystemSpecification,
     reporter: Reporter,
     tot_iter: int,
     loss_reporter: list | None = None,

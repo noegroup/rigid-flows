@@ -18,6 +18,7 @@ from openmm import unit
 kB = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(unit.kilojoule_per_mole / unit.kelvin)
 
 import sys
+
 from tqdm import trange
 
 from rigid_flows.systems.watermodel import WaterModel
@@ -134,7 +135,7 @@ for n in trange(n_iter):
             simulation.context.getState()
             .getPeriodicBoxVectors(asNumpy=True)
             .value_in_unit(unit.nanometers)
-        )    
+        )
     if (n + 1) % (n_iter // 10) == 0:
         with open(logfile, "a") as log:
             log.write(f"step {n+1}\n")
@@ -152,7 +153,7 @@ with open(logfile, "a") as log:
 # production run
 
 pace = 500
-n_iter = 100_000
+n_iter = 10_000
 # simulation = model.setup_simulation(temp)
 
 MDene = np.full(n_iter, np.nan)

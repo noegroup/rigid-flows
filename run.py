@@ -115,7 +115,6 @@ def train(
             target,
             flow,
             train_spec,
-            specs.model.target,
             reporter.with_scope(f"training_stage_{stage}"),
             tot_iter,
             loss_reporter,

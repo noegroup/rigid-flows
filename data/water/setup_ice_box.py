@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-# SBATCH -p gpu --gres=gpu:1 --exclusive
-# SBATCH --time=120:00:00
+#SBATCH -p gpu --gres=gpu:1 --exclusive
+#SBATCH --time=120:00:00
 ### #SBATCH --output=output.out
 
 # # Setup ice box
@@ -39,7 +39,7 @@ if len(sys.argv) != 3:
 size = int(sys.argv[1])
 temp = float(sys.argv[2])
 
-water_type = "tip4pice"
+water_type = "tip4pew"
 ice_type = "XI"
 rep = 3 * [size]
 

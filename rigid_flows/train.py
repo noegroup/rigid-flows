@@ -193,7 +193,6 @@ def run_training_stage(
     target: OpenMMDensity,
     flow: Flow,
     training_specs: TrainingSpecification,
-    # system_specs: SystemSpecification,
     reporter: Reporter,
     tot_iter: int,
     loss_reporter: list | None = None,

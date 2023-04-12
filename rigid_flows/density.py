@@ -51,7 +51,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 self.omm_energies, self.data.energy / self.omm_model.kbT, rtol=1e-4
             ):
                 raise ValueError(
-                    "omm_model energies are inconsisten with the stored ones"
+                    "omm_model energies are inconsistent with the stored ones"
                 )
         else:
             self.omm_energies = None

@@ -133,7 +133,11 @@ for n in range(n_iter):
             simulation.context.getState()
             .getPeriodicBoxVectors(asNumpy=True)
             .value_in_unit(unit.nanometers)
-        )
+        )    
+    if (n + 1) % n_iter // 10 == 0:
+        with open(logfile, "a") as log:
+            log.write(f"step {n+1}\n")
+
 
 # update model
 model.positions = MDpos[-1]
@@ -176,13 +180,13 @@ for n in range(n_iter):
             .value_in_unit(unit.nanometers)
         )
     if (n + 1) % n_iter // 10 == 0:
+        np.savez(
+            filename_MDtraj,
+            pos=MDpos[: n + 1],
+            box=MDbox[: n + 1],
+            ene=MDene[: n + 1],
+        )
         with open(logfile, "a") as log:
-            np.savez(
-                filename_MDtraj,
-                pos=MDpos[: n + 1],
-                box=MDbox[: n + 1],
-                ene=MDene[: n + 1],
-            )
             log.write(f"step {n+1}\n")
 
 np.savez(filename_MDtraj, pos=MDpos, box=MDbox, ene=MDene)

@@ -135,7 +135,7 @@ for n in trange(n_iter):
             .getPeriodicBoxVectors(asNumpy=True)
             .value_in_unit(unit.nanometers)
         )    
-    if (n + 1) % n_iter // 10 == 0:
+    if (n + 1) % (n_iter // 10) == 0:
         with open(logfile, "a") as log:
             log.write(f"step {n+1}\n")
 
@@ -180,7 +180,7 @@ for n in trange(n_iter):
             .getPeriodicBoxVectors(asNumpy=True)
             .value_in_unit(unit.nanometers)
         )
-    if (n + 1) % n_iter // 10 == 0:
+    if (n + 1) % (n_iter // 10) == 0:
         np.savez(
             filename_MDtraj,
             pos=MDpos[: n + 1],

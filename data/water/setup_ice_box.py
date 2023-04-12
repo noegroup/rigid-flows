@@ -18,6 +18,7 @@ from openmm import unit
 kB = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(unit.kilojoule_per_mole / unit.kelvin)
 
 import sys
+from tqdm import trange
 
 from rigid_flows.systems.watermodel import WaterModel
 
@@ -116,7 +117,7 @@ if model.barostat is None:
 else:
     MDbox = np.full((n_iter, 3, 3), np.nan)
 
-for n in range(n_iter):
+for n in trange(n_iter):
     simulation.step(pace)
     MDene[n] = (
         simulation.context.getState(getEnergy=True)
@@ -161,7 +162,7 @@ if model.barostat is None:
 else:
     MDbox = np.full((n_iter, 3, 3), np.nan)
 
-for n in range(n_iter):
+for n in trange(n_iter):
     simulation.step(pace)
     MDene[n] = (
         simulation.context.getState(getEnergy=True)

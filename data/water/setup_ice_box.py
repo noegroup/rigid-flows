@@ -40,6 +40,7 @@ if len(sys.argv) != 3:
 
 size = int(sys.argv[1])
 temp = float(sys.argv[2])
+store_intermediate = True
 
 water_type = "tip4pew"
 ice_type = "XI"
@@ -182,12 +183,13 @@ for n in trange(n_iter):
             .value_in_unit(unit.nanometers)
         )
     if (n + 1) % (n_iter // 10) == 0:
-        np.savez(
-            filename_MDtraj,
-            pos=MDpos[: n + 1],
-            box=MDbox[: n + 1],
-            ene=MDene[: n + 1],
-        )
+        if store_intermediate:
+            np.savez(
+                filename_MDtraj,
+                pos=MDpos[: n + 1],
+                box=MDbox[: n + 1],
+                ene=MDene[: n + 1],
+            )
         with open(logfile, "a") as log:
             log.write(f"step {n+1}\n")
 

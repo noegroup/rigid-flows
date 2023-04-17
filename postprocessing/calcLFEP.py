@@ -37,7 +37,7 @@ pretrained_model_path = f"{logdir_path}/training_stage_{stage}/epoch_{epoch}/mod
 print(pretrained_model_path)
 
 specs = ExperimentSpecification.load_from_file(specs_path)
-specs = lenses.bind(specs).model.base.path.set(specs.model.base.path + "/eval_100")
+specs = lenses.bind(specs).model.base.path.set(specs.model.base.path + "/eval")
 selection = np.s_[-num_eval_samples:]
 
 base = OpenMMDensity.from_specs(specs.model.use_auxiliary, specs.model.base, selection)

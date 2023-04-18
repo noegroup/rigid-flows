@@ -1,5 +1,5 @@
 #!/usr/bin/env python
-#SBATCH -p gpu --gres=gpu:1 --exclusive
+#SBATCH -p gpu --gres=gpu:1
 #SBATCH --time=120:00:00
 ### #SBATCH --output=output.out
 

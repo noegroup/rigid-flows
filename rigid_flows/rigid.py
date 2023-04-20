@@ -6,9 +6,9 @@ from jax_dataclasses import pytree_dataclass
 
 @pytree_dataclass(frozen=True)
 class InternalCoordinates:
-    d_OH1: jnp.ndarray  # = jnp.array(0.09572)
-    d_OH2: jnp.ndarray  # = jnp.array(0.09572)
-    a_HOH: jnp.ndarray  # = jnp.array(1.82421813418)
+    d_OH1: jnp.ndarray
+    d_OH2: jnp.ndarray
+    a_HOH: jnp.ndarray
 
     def asarray(self):
         return jnp.array(

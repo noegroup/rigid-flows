@@ -1,6 +1,6 @@
 #!/usr/bin/env python
-# SBATCH -p gpu --gres=gpu:1 --exclusive
-# SBATCH --time=120:00:00
+#SBATCH -p gpu --gres=gpu:1
+#SBATCH --time=120:00:00
 ### #SBATCH --output=output.out
 
 # # Setup ice box
@@ -18,6 +18,8 @@ from openmm import unit
 kB = unit.MOLAR_GAS_CONSTANT_R.value_in_unit(unit.kilojoule_per_mole / unit.kelvin)
 
 import sys
+
+from tqdm import trange
 
 from rigid_flows.systems.watermodel import WaterModel
 
@@ -38,8 +40,9 @@ if len(sys.argv) != 3:
 
 size = int(sys.argv[1])
 temp = float(sys.argv[2])
+store_intermediate = True
 
-water_type = "tip4pice"
+water_type = "tip4pew"
 ice_type = "XI"
 rep = 3 * [size]
 
@@ -116,7 +119,7 @@ if model.barostat is None:
 else:
     MDbox = np.full((n_iter, 3, 3), np.nan)
 
-for n in range(n_iter):
+for n in trange(n_iter):
     simulation.step(pace)
     MDene[n] = (
         simulation.context.getState(getEnergy=True)
@@ -134,6 +137,10 @@ for n in range(n_iter):
             .getPeriodicBoxVectors(asNumpy=True)
             .value_in_unit(unit.nanometers)
         )
+    if (n + 1) % (n_iter // 10) == 0:
+        with open(logfile, "a") as log:
+            log.write(f"step {n+1}\n")
+
 
 # update model
 model.positions = MDpos[-1]
@@ -147,7 +154,7 @@ with open(logfile, "a") as log:
 # production run
 
 pace = 500
-n_iter = 100_000
+n_iter = 10_000
 # simulation = model.setup_simulation(temp)
 
 MDene = np.full(n_iter, np.nan)
@@ -157,7 +164,7 @@ if model.barostat is None:
 else:
     MDbox = np.full((n_iter, 3, 3), np.nan)
 
-for n in range(n_iter):
+for n in trange(n_iter):
     simulation.step(pace)
     MDene[n] = (
         simulation.context.getState(getEnergy=True)
@@ -175,14 +182,15 @@ for n in range(n_iter):
             .getPeriodicBoxVectors(asNumpy=True)
             .value_in_unit(unit.nanometers)
         )
-    if (n + 1) % n_iter // 10 == 0:
-        with open(logfile, "a") as log:
+    if (n + 1) % (n_iter // 10) == 0:
+        if store_intermediate:
             np.savez(
                 filename_MDtraj,
                 pos=MDpos[: n + 1],
                 box=MDbox[: n + 1],
                 ene=MDene[: n + 1],
             )
+        with open(logfile, "a") as log:
             log.write(f"step {n+1}\n")
 
 np.savez(filename_MDtraj, pos=MDpos, box=MDbox, ene=MDene)

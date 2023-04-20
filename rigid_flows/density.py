@@ -34,16 +34,11 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         aux_model: tfp.distributions.Distribution | None,
         data: PreprocessedData,
         stored_energies: bool = True,
-        com_std_scaling: float = 0.05,
     ):
         self.aux_model = aux_model
         self.sys_specs = sys_specs
         self.omm_model = omm_model
         self.data = data
-
-        com_means = data.box.reshape(3) / 2
-        com_stds = data.box.reshape(3) / omm_model.model.n_molecules * com_std_scaling
-        self.com_model = tfp.distributions.Normal(com_means, com_stds)
 
         if stored_energies:
             self.omm_energies = self.compute_energies(
@@ -56,7 +51,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
                 self.omm_energies, self.data.energy / self.omm_model.kbT, rtol=1e-4
             ):
                 raise ValueError(
-                    "omm_model energies are inconsisten with the stored ones"
+                    "omm_model energies are inconsistent with the stored ones"
                 )
         else:
             self.omm_energies = None
@@ -107,12 +102,12 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         )
 
     def sample(self, key: KeyArray) -> Transformed[DataWithAuxiliary]:
-        """Samples from the target (data) distribution."""
+        """Samples randomly from the target (data) distribution."""
         idx = jax.random.randint(key, minval=0, maxval=len(self.data.pos), shape=())
         return self.sample_idx(key, idx)
 
     def sample_idx(self, key: KeyArray, idx: int) -> Transformed[DataWithAuxiliary]:
-        """Samples from the target (data) distribution.
+        """Samples from the target (data) distribution at specified index.
 
         Positions are taken from MD trajectory.
 

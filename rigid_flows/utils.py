@@ -7,7 +7,7 @@ import equinox as eqx
 import jax
 import jax.numpy as jnp
 import numpy as np
-from equinox.module import Static
+from equinox._module import Static
 
 R = TypeVar("R")
 P = ParamSpec("P")

@@ -84,7 +84,8 @@ class WaterModel:
             removeCMMotion=True,
         )
         forces = {f.__class__.__name__: f for f in system.getForces()}
-        forces["NonbondedForce"].setUseSwitchingFunction(False)
+        forces["NonbondedForce"].setUseSwitchingFunction(True)
+        forces["NonbondedForce"].setSwitchingDistance(0.9 * nonbondedCutoff)
         forces["NonbondedForce"].setUseDispersionCorrection(True)
         forces["NonbondedForce"].setEwaldErrorTolerance(1e-4)  # default is 5e-4
         oxygen_parameters = forces["NonbondedForce"].getParticleParameters(0)

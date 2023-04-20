@@ -42,7 +42,7 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
     logging.info("Loading base density.")
     num_datapoints = specs.model.base.num_samples
     if num_datapoints is not None:
-        logging.info(f"  taking only {num_datapoints} samples from MD")
+        logging.info(f"  taking only {num_datapoints:_} samples from MD")
         selection = np.s_[:num_datapoints]
     else:
         selection = np.s_[:]
@@ -53,7 +53,7 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
     logging.info(f"Loading target density.")
     num_datapoints = specs.model.target.num_samples
     if num_datapoints is not None:
-        logging.info(f"  taking only {num_datapoints} samples from MD")
+        logging.info(f"  taking only {num_datapoints:_} samples from MD")
         selection = np.s_[:num_datapoints]
     else:
         selection = np.s_[:]

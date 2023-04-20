@@ -85,9 +85,7 @@ print(
 
 
 try:
-    ref_file = (
-        f"../data/water/DeltaF_estimates-sw/DF-{specs.model.base}-{specs.model.target}.txt"
-    )
+    ref_file = f"../data/water/DeltaF_estimates-sw/DF-{specs.model.base}-{specs.model.target}.txt"
     reference_deltaF, reference_deltaF_std = np.loadtxt(ref_file, unpack=True)
 except FileNotFoundError:
     print("reference DeltaF not found")

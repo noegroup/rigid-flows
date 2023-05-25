@@ -24,7 +24,6 @@ class Data:
     def from_specs(
         specs: SystemSpecification,
         omm_model: OpenMMEnergyModel,
-        selection: slice = np.s_[:],
     ):
         path = f"{specs.path}/MDtraj-{specs}.npz"
         logging.info(f"Loading data from {path}")
@@ -35,11 +34,11 @@ class Data:
             ), "model and MDtraj box differ"
 
         data = Data(
-            pos=raw["pos"][selection].reshape(
+            pos=raw["pos"][:specs.num_samples].reshape(
                 -1, omm_model.model.n_molecules, omm_model.model.n_sites, 3
             ),
-            box=jax.vmap(jnp.diag)(raw["box"][selection]),
-            energy=raw["ene"][selection],
+            box=jax.vmap(jnp.diag)(raw["box"][:specs.num_samples]),
+            energy=raw["ene"][:specs.num_samples],
         )
 
         return data

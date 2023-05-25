@@ -43,7 +43,7 @@ model:
           num_channels: 32
       
   base:
-    path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"
+    path: "../MDdata/ice/trajectories"
     num_molecules: 16
     temperature: 250
     ice_type: XI
@@ -51,23 +51,23 @@ model:
     num_samples: 10_000
 
   target:
-    path: "/group/ag_cmb/scratch/minvernizzi/so3-flow/ice_MDdata"
+    path: "../MDdata/ice/trajectories"
     num_molecules: 16
     temperature: 100
     ice_type: XI
     water_type: tip4pew
-    num_samples: 10_000
+    num_samples: 0 #not needed for training
 
 
 train:
 
   # multiple training stages can be defined
-  - num_epochs: 3
+  - num_epochs: 5
     num_iters_per_epoch: 1000
     num_samples: 32
 
-    init_learning_rate: 5e-3
-    target_learning_rate: 5e-4
+    init_learning_rate: 1e-3
+    target_learning_rate: 1e-4
 
     weight_fe: 1.
     weight_nll: 0.   

@@ -32,7 +32,7 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         sys_specs: SystemSpecification,
         omm_model: OpenMMEnergyModel,
         aux_model: tfp.distributions.Distribution | None,
-        data: PreprocessedData,
+        data: PreprocessedData | None,
         stored_energies: bool = True,
     ):
         self.aux_model = aux_model
@@ -40,6 +40,8 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         self.omm_model = omm_model
         self.data = data
 
+        if data is None:
+            stored_energies = False
         if stored_energies:
             self.omm_energies = self.compute_energies(
                 DataWithAuxiliary(self.data.pos, None, jnp.array([]), self.box),
@@ -118,6 +120,10 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
         Returns:
             Transformed[AugmentedData]: Sample from the target distribution.
         """
+
+        if self.data is None:
+            raise ValueError("cannot sample from a density with no data attached")
+
         pos = self.data.pos[idx]
 
         chain = key_chain(key)
@@ -149,13 +155,15 @@ class OpenMMDensity(DensityModel[DataWithAuxiliary]):
     def from_specs(
         use_auxiliary: bool,
         sys_specs: SystemSpecification,
-        selection: slice = np.s_[:],
     ):
 
         omm_model = OpenMMEnergyModel.from_specs(sys_specs)
 
-        data = Data.from_specs(sys_specs, omm_model, selection)
-        data = PreprocessedData.from_data(data)
+        if sys_specs.num_samples == 0:
+            data = None
+        else:
+            data = Data.from_specs(sys_specs, omm_model)
+            data = PreprocessedData.from_data(data)
 
         if use_auxiliary:
             auxiliary_shape = [omm_model.model.n_molecules, SPATIAL_DIM]

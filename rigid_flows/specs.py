@@ -62,7 +62,7 @@ class SystemSpecification:
     ice_type: str
     water_type: str = "tip4pew"
 
-    num_samples: int | None = None
+    num_samples: int | None = None #take only the initial num_samples. None takes all, 0 takes none
 
     def __str__(self) -> str:
         string = f"ice{self.ice_type}_T{self.temperature}_N{self.num_molecules}"

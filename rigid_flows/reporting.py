@@ -442,17 +442,20 @@ def report_model(
 
     logging.info("preparing report")
 
-    logging.info("sampling from data")
-    with jit_and_cleanup_cache(
-        scanned_vmap(
-            partial(sample_from_target, target=target),
-            specs.num_samples_per_batch,
-        )
-    ) as sample:
-        data_samples: Transformed[DataWithAuxiliary] = sample(
-            jax.random.split(next(chain), specs.num_samples)
-        )
-    assert data_samples is not None
+    if target.data is None:
+        logging.info("no data for target")
+    else:
+        logging.info("sampling from data")
+        with jit_and_cleanup_cache(
+            scanned_vmap(
+                partial(sample_from_target, target=target),
+                specs.num_samples_per_batch,
+            )
+        ) as sample:
+            data_samples: Transformed[DataWithAuxiliary] = sample(
+                jax.random.split(next(chain), specs.num_samples)
+            )
+        assert data_samples is not None
 
     logging.info("sampling from prior")
     with jit_and_cleanup_cache(

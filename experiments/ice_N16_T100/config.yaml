@@ -1,0 +1,71 @@
+# random seed of the model
+seed: 42
+
+global_step: 0
+
+reporting:
+  num_samples: 1000 # null for no reporting
+  num_samples_per_batch: 32
+
+  report_ess: true
+  report_likelihood: false
+
+  save_model: true
+  save_samples: false
+  save_statistics: false
+
+  plot_quaternions: null
+  plot_oxygens: false
+  plot_energy_histograms: false
+
+model:
+
+  pretrained_model_path: null
+
+  use_auxiliary: false
+
+  flow:
+    couplings:
+      - num_repetitions: 4
+        auxiliary_update:
+          num_blocks: 2
+          num_heads: 8
+          num_channels: 32
+        position_update:
+          num_blocks: 2
+          num_heads: 8
+          num_channels: 32
+        quaternion_update:
+          num_blocks: 2
+          num_heads: 8
+          num_channels: 32
+      
+  base:
+    path: "../MDdata/ice/trajectories"
+    num_molecules: 16
+    temperature: 250
+    ice_type: XI
+    water_type: tip4pew
+    num_samples: 10_000
+
+  target:
+    path: "../MDdata/ice/trajectories"
+    num_molecules: 16
+    temperature: 100
+    ice_type: XI
+    water_type: tip4pew
+    num_samples: 0 #not needed for training
+
+
+train:
+
+  - num_epochs: 10
+    num_iters_per_epoch: 1000
+    num_samples: 32
+
+    init_learning_rate: 1e-3
+    target_learning_rate: 1e-5
+
+    weight_fe: 1.
+    weight_nll: 0.
+

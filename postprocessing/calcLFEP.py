@@ -1,6 +1,10 @@
 #!/usr/bin/env python
 
+# Postprocessing script to compute the free energy difference via LFEP.
+# example: python calcLFEP.py ../experiments/ice_N16_T100
+
 import sys
+import glob
 from typing import cast
 
 import equinox as eqx
@@ -18,32 +22,37 @@ from rigid_flows.flow import RigidWithAuxiliary, build_flow
 from rigid_flows.specs import ExperimentSpecification
 from rigid_flows.utils import scanned_vmap
 
-assert len(sys.argv) == 2, "please specify the folder path"
-logdir_path = sys.argv[1]
-stage = 0
-epoch = 9
-
+# the evaluation MD trajectory should be different from the training one
+eval_subdir = "eval"
 num_eval_samples = 10_000
+
+# details for LFEP evaluation
 num_iterations = 10
 num_samples = num_eval_samples
-
 stop_for_plots = True
 override_stats = False
 n_sigmas = 2  # errorbars are n_sigmas wide
 
+# load experiment folder
+assert len(sys.argv) == 2, "please specify the folder path"
+logdir_path = sys.argv[1]
+dirs = glob.glob(f"{logdir_path}/training_stage_*")
+stage = max([int(d.split("_")[-1]) for d in dirs])
+dirs = glob.glob(f"{logdir_path}/training_stage_{stage}/epoch_*")
+epoch = max([int(d.split("_")[-1]) for d in dirs])
 print(f"+++ trainng stage {stage}, epoch {epoch} +++")
 specs_path = f"{logdir_path}/config.yaml"
 pretrained_model_path = f"{logdir_path}/training_stage_{stage}/epoch_{epoch}/model.eqx"
 print(pretrained_model_path)
 
 specs = ExperimentSpecification.load_from_file(specs_path)
-specs = lenses.bind(specs).model.base.path.set(specs.model.base.path + "/eval")
-selection = np.s_[-num_eval_samples:]
-
-base = OpenMMDensity.from_specs(specs.model.use_auxiliary, specs.model.base, selection)
-target = OpenMMDensity.from_specs(
-    specs.model.use_auxiliary, specs.model.target, selection
+specs = lenses.bind(specs).model.base.num_samples.set(num_eval_samples)
+specs = lenses.bind(specs).model.base.path.set(
+    specs.model.base.path + "/" + eval_subdir
 )
+
+base = OpenMMDensity.from_specs(specs.model.use_auxiliary, specs.model.base)
+target = OpenMMDensity.from_specs(specs.model.use_auxiliary, specs.model.target)
 model = base.omm_model.model
 
 sc = model.n_molecules  # rescale free energy by number of molecules
@@ -85,7 +94,9 @@ print(
 
 
 try:
-    ref_file = f"../data/water/DeltaF_estimates-sw/DF-{specs.model.base}-{specs.model.target}.txt"
+    ref_file = (
+        f"../MDdata/ice/DeltaF_estimates/DF-{specs.model.base}-{specs.model.target}.txt"
+    )
     reference_deltaF, reference_deltaF_std = np.loadtxt(ref_file, unpack=True)
 except FileNotFoundError:
     print("reference DeltaF not found")

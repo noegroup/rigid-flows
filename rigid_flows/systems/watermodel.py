@@ -30,7 +30,14 @@ class WaterModel:
         barostat=None,
         external_field=None,
     ):
-        if water_type not in ["tip3p", "tip4pew", "tip5p", "spce", "tip4pew-customLJ"]:
+        if water_type not in [
+            "tip3p",
+            "tip4pew",
+            "tip5p",
+            "spce",
+            "tip4pew-customLJ",
+            "tip4pice",
+        ]:
             print(
                 f"+++ WARNING: Unknown water_type `{water_type}` +++",
                 file=stderr,
@@ -44,10 +51,14 @@ class WaterModel:
         assert (
             len(positions) % n_sites == 0
         ), "mismatch between number of atoms per molecule and total number of atoms"
-        n_waters = len(positions) // n_sites
+        n_molecules = len(positions) // n_sites
 
-        mdtraj_topology = self.generate_mdtraj_topology(n_waters, n_sites)
+        # mask to remove virtual sites
+        vs_mask = np.ones((n_molecules, n_sites, 3))
+        vs_mask[:, 3:, :] = 0  # anything beyond 3 is a virtual site
+        vs_mask = vs_mask.reshape((n_molecules * n_sites, 3))
 
+        mdtraj_topology = self.generate_mdtraj_topology(n_molecules, n_sites)
         topology = mdtraj_topology.to_openmm()
         topology.setPeriodicBoxVectors(box)
 
@@ -59,7 +70,12 @@ class WaterModel:
                 file=stderr,
             )
 
-        ff = openmm.app.ForceField(water_type.removesuffix("-customLJ") + ".xml")
+        ff_filename = water_type.removesuffix("-customLJ") + ".xml"
+        if "tip4pice" in water_type:
+            import os
+
+            ff_filename = f"{os.path.dirname(__file__)}/{ff_filename}"
+        ff = openmm.app.ForceField(ff_filename)
         system = ff.createSystem(
             topology,
             nonbondedMethod=openmm.app.PME,
@@ -68,7 +84,8 @@ class WaterModel:
             removeCMMotion=True,
         )
         forces = {f.__class__.__name__: f for f in system.getForces()}
-        forces["NonbondedForce"].setUseSwitchingFunction(False)
+        forces["NonbondedForce"].setUseSwitchingFunction(True)
+        forces["NonbondedForce"].setSwitchingDistance(0.9 * nonbondedCutoff)
         forces["NonbondedForce"].setUseDispersionCorrection(True)
         forces["NonbondedForce"].setEwaldErrorTolerance(1e-4)  # default is 5e-4
         oxygen_parameters = forces["NonbondedForce"].getParticleParameters(0)
@@ -117,11 +134,13 @@ class WaterModel:
 
         self._positions = np.array(positions)
         self._box = np.array(box)
-        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diagonal(box)))
+        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diag(box)))
 
-        self.n_waters = n_waters
+        self.n_molecules = n_molecules
         self.n_sites = n_sites
-        self.n_atoms = n_waters * n_sites
+        self.n_atoms = n_molecules * n_sites
+        self.vs_mask = vs_mask
+
         self.water_type = water_type
         self.nonbondedCutoff = nonbondedCutoff
         self.rigidWater = rigidWater
@@ -143,17 +162,17 @@ class WaterModel:
         self._box = np.array(box)
         self.topology.setPeriodicBoxVectors(box)
         self.system.setDefaultPeriodicBoxVectors(*box)
-        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diagonal(box)))
+        self.is_box_orthorombic = not np.count_nonzero(box - np.diag(np.diag(box)))
 
     @staticmethod
-    def generate_mdtraj_topology(n_waters, n_sites=4):
+    def generate_mdtraj_topology(n_molecules, n_sites=4):
         assert n_sites >= 3, "only 3 or more sites are supported"
         H = md.element.Element.getBySymbol("H")
         O = md.element.Element.getBySymbol("O")
         VS = md.element.Element.getBySymbol("VS")
         water_top = md.Topology()
         water_top.add_chain()
-        for i in range(n_waters):
+        for i in range(n_molecules):
             water_top.add_residue("HOH", water_top.chain(0))
             water_top.add_atom("O", O, water_top.residue(i))
             water_top.add_atom("H1", H, water_top.residue(i))
@@ -319,7 +338,7 @@ class WaterModel:
             else:
                 context.reinitialize()
 
-    def plot_2Dview(self, pos=None, box=None, toPBC=False):
+    def plot_2Dview(self, pos=None, box=None, toPBC=False, title=None):
         if pos is None:
             pos = self._positions
         if box is None:
@@ -342,13 +361,14 @@ class WaterModel:
 
         if toPBC:
             if self.is_box_orthorombic:
-                mypos = (pos / np.diagonal(av_box) % 1) * np.diagonal(av_box)
+                mypos = pos % np.diagonal(av_box)
             else:
                 raise NotImplementedError("only available for fixed orthorombic box")
         else:
             mypos = pos
 
         plt.figure(figsize=(15, 4))
+        plt.suptitle(title)
         for i in range(3):
             ii = (i + 1) % 3
             iii = (i + 2) % 3
@@ -390,9 +410,18 @@ class WaterModel:
             if not self.is_box_orthorombic:
                 coord2 = [
                     coord[1],
-                    [coord[1][0] + av_box[iii, i], coord[1][1] + av_box[iii, ii]],
-                    [coord[2][0] + av_box[iii, i], coord[2][1] + av_box[iii, ii]],
-                    [coord[3][0] + av_box[iii, i], coord[3][1] + av_box[iii, ii]],
+                    [
+                        coord[1][0] + av_box[iii, i],
+                        coord[1][1] + av_box[iii, ii],
+                    ],
+                    [
+                        coord[2][0] + av_box[iii, i],
+                        coord[2][1] + av_box[iii, ii],
+                    ],
+                    [
+                        coord[3][0] + av_box[iii, i],
+                        coord[3][1] + av_box[iii, ii],
+                    ],
                     coord[3],
                 ]
                 xs, ys = zip(*coord2)
@@ -406,36 +435,60 @@ class WaterModel:
             plt.gca().set_aspect(1)
         plt.show()
 
-    def get_mdtraj(self, pos=None, box=None):
+    def get_mdtraj(self, pos=None, box=None, mdtraj_topology=None):
         if pos is None:
             pos = self._positions
         if box is None:
             box = self._box
+        if mdtraj_topology is None:
+            mdtraj_topology = self.mdtraj_topology
 
-        traj = md.Trajectory(pos, self.mdtraj_topology)
+        traj = md.Trajectory(pos, mdtraj_topology)
         traj.unitcell_vectors = np.resize(box, (len(traj), 3, 3))
 
         return traj
 
     def plot_rdf(
-        self, pos=None, box=None, r_range=[0, 1], selection="name == O", **kwargs
+        self,
+        pos=None,
+        box=None,
+        selection="name == O",
+        r_range=[0, 1],
+        n_bins=None,
+        **kwargs,
     ):
         traj = self.get_mdtraj(pos, box)
         ij = self.mdtraj_topology.select_pairs(selection, selection)
-        rdf = md.compute_rdf(traj, ij, r_range=r_range)
+        rdf = md.compute_rdf(traj, ij, r_range=r_range, n_bins=n_bins)
 
         plt.plot(*rdf, **kwargs)
         plt.ylabel("g(r)")
         plt.xlabel("r [nm]")
         plt.xlim(r_range)
 
-    def get_view(self, pos=None, box=None):
+    def get_view(self, pos=None, box=None, virtualsites=True):
         """visualize in notebook with nglview"""
         if nv is None:
             print("+++ WARNING: nglview not available +++", file=stderr)
             return None
-
-        view = nv.show_mdtraj(self.get_mdtraj(pos, box))
+        if virtualsites or self.n_sites == 3:
+            view = nv.show_mdtraj(self.get_mdtraj(pos, box))
+        else:
+            mask_vs = np.tile(
+                np.concatenate((3 * [True], (self.n_sites - 3) * [False])),
+                self.n_molecules,
+            )
+            if pos is None:
+                pos = self._positions[None]
+            if len(pos.shape) == 2:
+                pos = pos[None]
+            view = nv.show_mdtraj(
+                self.get_mdtraj(
+                    pos[:, mask_vs],
+                    box,
+                    self.generate_mdtraj_topology(self.n_molecules, 3),
+                )
+            )
         view.add_representation("ball+stick", selection="water")
         view.add_unitcell()
         return view

@@ -15,6 +15,9 @@ from openmm import unit  # type: ignore
 from .specs import SystemSpecification
 from .systems.watermodel import WaterModel
 
+SPATIAL_DIM = 3
+QUATERNION_DIM = 4
+
 
 @pytree_dataclass(frozen=True)
 class SimulationBox:
@@ -73,46 +76,6 @@ class OpenMMEnergyModel:
         self.context.setPositions(model.positions)
         self.error_handling = error_handling
 
-    def set_softcore_cutoff(
-        self,
-        cutoff: float | None,
-        type: str | None = None,
-        slope: float | None = None,
-    ):
-        """
-        cutoff: units of LJ sigma, set to None for standard LJ potential
-        type: 'linear' or 'square'
-        slope: used only when type='square'
-        """
-        my_lennard_jones = partial(
-            lennard_jones,
-            sigma=self.model.sigma_O,
-            epsilon=self.model.epsilon_O,
-        )
-        if cutoff is None:
-            expr = parse_jaxpr(my_lennard_jones)[0]
-        else:
-            match type:
-                case "linear":
-                    expr = get_approx_expr(
-                        my_lennard_jones,
-                        approx_with_linear,
-                        cutoff=cutoff * self.model.sigma_O,
-                    )
-                case "square":
-                    if slope is None:
-                        raise ValueError(
-                            "must set slope when using square approximation"
-                        )
-                    expr = get_approx_expr(
-                        my_lennard_jones,
-                        partial(approx_with_square, slope=slope),
-                        cutoff=cutoff * self.model.sigma_O,
-                    )
-                case _:
-                    raise ValueError(f"unkown cutoff type: '{type}'")
-        self.model.set_customLJ(expr, self.context)
-
     def set_box(self, box: SimulationBox):
         box_vectors = np.diag(np.array(box.size))
         self.context.setPeriodicBoxVectors(*box_vectors)
@@ -123,6 +86,8 @@ class OpenMMEnergyModel:
         box: np.ndarray | None,
         error_handling: ErrorHandling | None = None,
     ):
+        pos = pos.reshape(-1, self.model.n_atoms, 3)
+
         energies = np.empty(pos.shape[0], dtype=np.float32)
         forces = np.empty_like(pos, dtype=np.float32)
 
@@ -133,21 +98,21 @@ class OpenMMEnergyModel:
             assert box.shape == (3, 3), f"box.shape = {box.shape}"
             self.context.setPeriodicBoxVectors(*box)
 
+        assert self.model.vs_mask.shape == (self.model.n_atoms, 3)
+
         # iterate over batch dimension
         for i in range(len(pos)):
 
-            energy = jnp.empty_like(energies[i])
-            force = jnp.empty_like(forces[i])
+            energy = np.empty_like(energies[i])
+            force = np.empty_like(forces[i])
 
             try:
                 self.context.setPositions(pos[i])
-                # self.context.computeVirtualSites()
+                self.context.computeVirtualSites()  # make sure virtual sites are correct
 
                 state = self.context.getState(getEnergy=True, getForces=True)
                 energy = (
-                    state.getPotentialEnergy().value_in_unit(
-                        unit.kilojoule_per_mole
-                    )
+                    state.getPotentialEnergy().value_in_unit(unit.kilojoule_per_mole)
                     / self.kbT
                 )
                 force = (
@@ -166,7 +131,9 @@ class OpenMMEnergyModel:
                         pass
             finally:
                 energies[i] = energy
-                forces[i] = force
+                forces[i] = (
+                    force * self.model.vs_mask
+                )  # set force on virtual sites to zero
 
         return energies, forces
 
@@ -179,20 +146,18 @@ class OpenMMEnergyModel:
 
 
 def wrap_openmm_model(model: OpenMMEnergyModel):
-    def compute_energy_and_forces(
-        pos: Array, box: Array | None, has_batch_dim: bool
-    ):
+    def compute_energy_and_forces(pos: Array, box: Array | None, has_batch_dim: bool):
 
         if box is not None:
             assert box.shape == (3,)
             box = jnp.diag(box)
 
         if not has_batch_dim:
-            assert pos.shape == (model.model.n_waters, model.model.n_sites, 3)
+            assert pos.shape == (model.model.n_molecules, model.model.n_sites, 3)
             pos = jnp.expand_dims(pos, axis=0)
         else:
             assert pos.shape[1:] == (
-                model.model.n_waters,
+                model.model.n_molecules,
                 model.model.n_sites,
                 3,
             )
@@ -231,105 +196,3 @@ def wrap_openmm_model(model: OpenMMEnergyModel):
     eval.defvjp(eval_fwd, eval_bwd)
 
     return eval, compute_energy_and_forces
-
-
-def lennard_jones(r, sigma, epsilon):
-    return 4 * epsilon * ((sigma / r) ** 12 - (sigma / r) ** 6)
-
-
-def parse_jaxpr(
-    fn: Callable, args: tuple[str] | None = None, symbols: dict = {}
-):
-
-    placeholders = []
-    defaults = []
-
-    if args is None:
-        sig = inspect.signature(fn)
-        for key, val in sig.parameters.items():
-            if val.default != inspect._empty:
-                defaults.append(val.default)
-            else:
-                placeholders.append(key)
-
-    jaxpr_kwargs = [
-        jax.ShapedArray((), dtype=jnp.float32) for _ in placeholders
-    ]
-    jaxpr = jax.make_jaxpr(fn)(*jaxpr_kwargs)
-    symbols = {
-        str(sym): key if key not in symbols else symbols[key]
-        for (sym, key) in zip(jaxpr.jaxpr.invars, placeholders, strict=True)
-    }
-
-    def fetch_symbol(arg):
-        if isinstance(arg, jax.core.Var):
-            return symbols[str(arg)]
-        elif isinstance(arg, jax.core.Literal):
-            return str(arg)
-        else:
-            raise ValueError()
-
-    for eqn in jaxpr.eqns:
-        match eqn.primitive.name:
-            case "mul":
-                fst, snd = map(fetch_symbol, eqn.invars)
-                out = str(eqn.outvars[0])
-                symbols[out] = f"({fst} * {snd})"
-            case "div":
-                fst, snd = map(fetch_symbol, eqn.invars)
-                out = str(eqn.outvars[0])
-                symbols[out] = f"({fst} / {snd})"
-            case "integer_pow":
-                (fst,) = map(fetch_symbol, eqn.invars)
-                exp = str(eqn.params["y"])
-                out = str(eqn.outvars[0])
-                symbols[out] = f"{fst}^{exp}"
-            case "sub":
-                fst, snd = map(fetch_symbol, eqn.invars)
-                out = str(eqn.outvars[0])
-                symbols[out] = f"({fst} - {snd})"
-            case "add":
-                fst, snd = map(fetch_symbol, eqn.invars)
-                out = str(eqn.outvars[0])
-                symbols[out] = f"({fst} + {snd})"
-            case "convert_element_type":
-                (fst,) = map(fetch_symbol, eqn.invars)
-                out = str(eqn.outvars[0])
-                symbols[out] = f"{fst}"
-            case _:
-                raise ValueError(eqn.primitive.name)
-
-    return tuple(map(fetch_symbol, jaxpr.jaxpr.outvars))
-
-
-def approx_with_square(original, cutoff: float, slope: float):
-    y0, dyx0 = map(float, jax.value_and_grad(original)(cutoff))
-    a = slope
-    b = dyx0 - 2 * a * cutoff
-    c = y0 - a * cutoff**2 - b * cutoff
-
-    def approx(r, a, b, c):
-        return a * r**2 + b * r + c
-
-    return partial(approx, a=a, b=b, c=c)
-
-
-def approx_with_linear(original, cutoff: float):
-    y0, dyx0 = map(float, jax.value_and_grad(original)(cutoff))
-    a = dyx0
-    b = y0 - a * cutoff
-
-    def approx(r, a, b):
-        return a * r + b
-
-    return partial(approx, a=a, b=b)
-
-
-def get_approx_expr(fun, approximation, cutoff, **kwargs):
-    original = parse_jaxpr(fun)[0]
-    fun_ = partial(fun, **kwargs)
-    approx = parse_jaxpr(approximation(fun_, cutoff))[0]
-    sig = inspect.signature(fun)
-    inp = tuple(sig.parameters.keys())[0]
-    filter = f"step({inp} - {cutoff})"
-    return f"select({filter}, {original}, {approx})"

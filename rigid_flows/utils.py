@@ -6,16 +6,15 @@ from typing import Any, Mapping, ParamSpec, TypeVar, cast
 import equinox as eqx
 import jax
 import jax.numpy as jnp
-from equinox.module import Static
+import numpy as np
+from equinox._module import Static
 
 R = TypeVar("R")
 P = ParamSpec("P")
 
 
 @contextlib.contextmanager
-def jit_and_cleanup_cache(
-    fn: Callable[P, R]
-) -> Generator[Callable[P, R], None, None]:
+def jit_and_cleanup_cache(fn: Callable[P, R]) -> Generator[Callable[P, R], None, None]:
     @partial(
         jax.jit,
         static_argnames=(
@@ -42,9 +41,7 @@ def jit_and_cleanup_cache(
         static, static_tree_def = jax.tree_util.tree_flatten(static)
         static = tuple(static)
 
-        dynamic_out, static_out = jitted_call(
-            args, kwargs, static, static_tree_def
-        )
+        dynamic_out, static_out = jitted_call(args, kwargs, static, static_tree_def)
         return cast(R, eqx.combine(dynamic_out, static_out.value))
 
     yield wrapper
@@ -100,9 +97,7 @@ def scanned_vmap(
             )
 
         # filter args tree to contain only args that are vmapped
-        mapped_args = eqx.filter(
-            args, jax.tree_map(lambda x: x is not None, in_axes_)
-        )
+        mapped_args = eqx.filter(args, jax.tree_map(lambda x: x is not None, in_axes_))
 
         # compute the number of elements in the super batch
         num_inputs = jax.tree_util.tree_flatten(
@@ -116,22 +111,18 @@ def scanned_vmap(
                 return None
             num_scanned = num_batches * batch_size
             shape = arg.shape
-            scanned_slice = (slice(None),) * ax + (
-                slice(None, num_scanned, None),
-            )
+            scanned_slice = (slice(None),) * ax + (slice(None, num_scanned, None),)
             scanned_arg = arg[scanned_slice]
             scanned_arg = scanned_arg.reshape(
                 *shape[:ax], num_batches, batch_size, *shape[ax + 1 :]
             )
-            scanned_arg = jnp.swapaxes(scanned_arg, 0, ax)
+            scanned_arg = jnp.swapaxes(scanned_arg, 0, ax)  # type: ignore
             return scanned_arg
 
         def slice_off_leftover(arg, ax, num_batches, batch_size):
             """slices off the leftover batch that does not need scanning over"""
             num_scanned = num_batches * batch_size
-            leftover_slice = (slice(None),) * ax + (
-                slice(num_scanned, None, None),
-            )
+            leftover_slice = (slice(None),) * ax + (slice(num_scanned, None, None),)
             leftover_arg = arg[leftover_slice]
             return leftover_arg
 

@@ -1,17 +1,13 @@
 import logging
 
 import jax
+import lenses
 import numpy as np
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 
-from .system import (
-    ErrorHandling,
-    OpenMMEnergyModel,
-    SimulationBox,
-    SystemSpecification,
-)
+from .system import ErrorHandling, OpenMMEnergyModel, SimulationBox, SystemSpecification
 
 logger = logging.getLogger("rigid-flows")
 
@@ -23,52 +19,56 @@ class Data:
     pos: jnp.ndarray
     box: jnp.ndarray
     energy: jnp.ndarray
-    force: jnp.ndarray | None = None
 
     @staticmethod
     def from_specs(
         specs: SystemSpecification,
+        omm_model: OpenMMEnergyModel,
     ):
         path = f"{specs.path}/MDtraj-{specs}.npz"
         logging.info(f"Loading data from {path}")
         raw = np.load(path)
-        data = Data(*map(jnp.array, raw.values()))
-        if data.box.shape[1:] == (3, 3):
-            data = Data(
-                data.pos, jax.vmap(jnp.diag)(data.box), data.energy, data.force
-            )
-        assert data.box.shape[1:] == (3,)
+        if raw["box"].shape[0] == 1:
+            assert jnp.allclose(
+                raw["box"][0], omm_model.model.box
+            ), "model and MDtraj box differ"
+
+        data = Data(
+            pos=raw["pos"][:specs.num_samples].reshape(
+                -1, omm_model.model.n_molecules, omm_model.model.n_sites, 3
+            ),
+            box=jax.vmap(jnp.diag)(raw["box"][:specs.num_samples]),
+            energy=raw["ene"][:specs.num_samples],
+        )
+
         return data
-
-    def recompute_forces(self, model: OpenMMEnergyModel):
-        _, forces = model.compute_energies_and_forces(
-            np.array(self.pos),
-            np.diag(np.array(self.box[0])),
-            error_handling=ErrorHandling.RaiseException,
-        )
-        return Data(
-            pos=self.pos,
-            box=self.box,
-            energy=self.energy,
-            force=jnp.array(forces),
-        )
-
-    def add_forces(self, forces):
-        return Data(
-            pos=self.pos,
-            box=self.box,
-            energy=self.energy,
-            force=jnp.array(forces).reshape(self.pos.shape),
-        )
 
 
 @pytree_dataclass(frozen=True)
-class AugmentedData:
+class PreprocessedData:
+
+    pos: jnp.ndarray
+    box: jnp.ndarray
+    energy: jnp.ndarray
+
+    @staticmethod
+    def from_data(data: Data) -> "PreprocessedData":
+
+        ## remove global translation using first molecule
+        pos = data.pos - data.pos[:, :1, :1]
+
+        ## put molecules back into PBC (without breaiking them)
+        shift = (pos[:, :, :1] % data.box) - pos[:, :, :1]
+        pos = pos + shift
+
+        return PreprocessedData(pos, data.box, data.energy)
+
+
+@pytree_dataclass(frozen=True)
+class DataWithAuxiliary:
     """Data augmented with auxilaries and quaternion signs."""
 
     pos: Array
-    com: Array
-    aux: Array
+    aux: Array | None
     sign: Array
     box: SimulationBox
-    force: jnp.ndarray | None = None

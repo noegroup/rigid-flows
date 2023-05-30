@@ -6,7 +6,7 @@ from mlparams.mlparams import from_yaml, to_yaml
 
 @pytree_dataclass(frozen=True)
 class ReportingSpecifications:
-    num_samples: int
+    num_samples: int | None
     num_samples_per_batch: int
     plot_quaternions: tuple[int, ...] | None
     plot_oxygens: bool
@@ -19,75 +19,23 @@ class ReportingSpecifications:
 
 
 @pytree_dataclass(frozen=True)
-class PosEncoderSpecification:
-    seq_len: int
-    activation: str
-    num_pos: int
-    expansion_factor: int
+class NodeUpdateSpecification:
     num_blocks: int
-
-
-@pytree_dataclass(frozen=True)
-class PosAndAuxUpdateSpecification:
-    seq_len: int
-    activation: str
-    num_dims: int
-    num_pos: int
-    expansion_factor: int
-    num_blocks: int
-    transform: str
-    num_low_rank: int
-    low_rank_regularizer: float
-
-
-@pytree_dataclass(frozen=True)
-class QuatUpdateSpecification:
-    seq_len: int
-    activation: str
-    expansion_factor: int
-    num_blocks: int
-
-
-@pytree_dataclass(frozen=True)
-class PreprocessingSpecification:
-    auxiliary_update: PosAndAuxUpdateSpecification
-    position_encoder: PosEncoderSpecification
-    act_norm: bool
+    num_heads: int
+    num_channels: int
 
 
 @pytree_dataclass(frozen=True)
 class CouplingSpecification:
     num_repetitions: int
-    auxiliary_update: PosAndAuxUpdateSpecification
-    position_update: PosAndAuxUpdateSpecification
-    quaternion_update: QuatUpdateSpecification
-    act_norm: bool
+    auxiliary_update: NodeUpdateSpecification
+    position_update: NodeUpdateSpecification
+    quaternion_update: NodeUpdateSpecification
 
 
 @pytree_dataclass(frozen=True)
 class FlowSpecification:
-    preprocessing: PreprocessingSpecification
     couplings: tuple[CouplingSpecification, ...]
-
-
-@pytree_dataclass(frozen=True)
-class TargetSpecification:
-    cutoff_threshold: float | None
-
-
-@pytree_dataclass(frozen=True)
-class BaseSpecification:
-    rot_concentration: float
-    pos_concentration: float
-
-
-@pytree_dataclass(frozen=True)
-class ModelSpecification:
-    auxiliary_shape: tuple[int, ...]
-    flow: FlowSpecification
-    base: BaseSpecification
-    target: TargetSpecification
-    pretrained_model_path: str | None
 
 
 @pytree_dataclass(frozen=True)
@@ -97,20 +45,9 @@ class TrainingSpecification:
     init_learning_rate: float
     target_learning_rate: float
     weight_nll: float
-    weight_fm_model: float
-    weight_fm_target: float
     weight_fe: float
-    weight_vg_model: float
-    weight_vg_target: float
-
-    fm_model_perturbation_noise: float
-    fm_target_perturbation_noise: float
-    fm_ignore_charge_site: bool
 
     num_samples: int
-    use_grad_clipping: bool
-    grad_clipping_ratio: float
-    apply_if_finite_trials: int
 
     @property
     def num_iterations(self):
@@ -123,16 +60,9 @@ class SystemSpecification:
     num_molecules: int
     temperature: int
     ice_type: str
-    recompute_forces: bool
-    store_forces: bool
-    forces_path: str | None
-    fixed_box: bool
-
-    softcore_cutoff: float | None
-    softcore_potential: str | None
-    softcore_slope: float | None
-
     water_type: str = "tip4pew"
+
+    num_samples: int | None = None #take only the initial num_samples. None takes all, 0 takes none
 
     def __str__(self) -> str:
         string = f"ice{self.ice_type}_T{self.temperature}_N{self.num_molecules}"
@@ -142,14 +72,21 @@ class SystemSpecification:
 
 
 @pytree_dataclass(frozen=True)
+class ModelSpecification:
+    use_auxiliary: bool
+    flow: FlowSpecification
+    base: SystemSpecification
+    target: SystemSpecification
+    pretrained_model_path: str | None
+
+
+@pytree_dataclass(frozen=True)
 class ExperimentSpecification:
     seed: int
     model: ModelSpecification
-    system: SystemSpecification
     train: tuple[TrainingSpecification]
     reporting: ReportingSpecifications
     global_step: int | None
-    act_norm_init_samples: int
 
     @staticmethod
     def load_from_file(path: str) -> "ExperimentSpecification":

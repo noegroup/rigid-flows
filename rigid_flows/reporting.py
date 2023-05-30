@@ -12,22 +12,21 @@ import jax
 import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf  # type: ignore
+from flox._src.flow.api import Inverted, Transform, Transformed, bind
+from flox._src.flow.sampling import Sampler
+from flox._src.util.jax import key_chain
+from flox._src.util.misc import unpack
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 from matplotlib.figure import Figure
 from matplotlib.patches import Patch
 
-from flox._src.flow.api import Inverted, Transform, Transformed, bind
-from flox._src.flow.sampling import Sampler
-from flox._src.util.jax import key_chain
-from flox._src.util.misc import unpack
-
-from .data import AugmentedData
-from .density import BaseDensity, KeyArray, TargetDensity
-from .flow import InitialTransform, State
+from .data import DataWithAuxiliary
+from .density import KeyArray, OpenMMDensity
+from .flow import EuclideanToRigidTransform
 from .specs import ReportingSpecifications
-from .system import OpenMMEnergyModel, SimulationBox
+from .system import SimulationBox
 from .utils import jit_and_cleanup_cache, scanned_vmap
 
 
@@ -97,6 +96,16 @@ def plot_quaternions(
         f"2D projections of quaternions {', '.join(map(str, quat_idxs))}"
     )
 
+    def normalize_quats(quats, ref):
+        sign = jnp.sign(jnp.sum(quats * ref[None], axis=-1))
+        quats = quats * sign[:, :, None]
+        return quats
+
+    ref = data[0]
+    data = normalize_quats(data, ref)
+    samples = normalize_quats(samples, ref)
+    prior = normalize_quats(prior, ref)
+
     fig = plt.figure(figsize=(6 * 2, len(quat_idxs) * 2 + 0.8))
     for i, (j, k) in it.product(quat_idxs, it.combinations(range(4), 2)):
         n = n + 1
@@ -147,8 +156,8 @@ def _plot_oxy_contour_lines(
         jnp.linspace(box.min[dim_j], box.max[dim_j], num_bins + 1),
     )
     h, levels, *_ = _compute_oxy_contour_levels(
-        p[:, :, dim_i].reshape(-1) % box.size[dim_i],
-        p[:, :, dim_j].reshape(-1) % box.size[dim_j],
+        p[:, :, dim_i].reshape(-1),  # % box.size[dim_i],
+        p[:, :, dim_j].reshape(-1),  # % box.size[dim_j],
     )
     return plt.contourf(
         gx,
@@ -193,14 +202,6 @@ def write_figure_to_tensorboard(label: str, fig: Figure, num_iter: int):
     image = tf.expand_dims(image, 0)
     summary_op = tf.summary.image(label, image, num_iter)
     return buf
-
-
-def compute_energies(
-    pos: np.ndarray, box: SimulationBox, model: OpenMMEnergyModel
-):
-    return model.compute_energies_and_forces(
-        pos.reshape(pos.shape[0], -1, 3), np.diag(box.size)
-    )
 
 
 def plot_energy_histogram(
@@ -314,55 +315,57 @@ def batched_sampler(
 
 
 def sample_from_model(
-    key: KeyArray, base: BaseDensity, flow: Transform[AugmentedData, State]
-) -> Transformed[AugmentedData]:
+    key: KeyArray,
+    base: OpenMMDensity,
+    flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
+) -> Transformed[DataWithAuxiliary]:
     latent = base.sample(key)
-    sample = bind(latent, Inverted(flow))
+    sample = bind(latent, flow)
     return sample
 
 
 def sample_from_target(
     key: KeyArray,
-    target: TargetDensity,
-) -> Transformed[AugmentedData]:
-    out = target.sample(key)
-    return out
+    target: OpenMMDensity,
+) -> Transformed[DataWithAuxiliary]:
+    return target.sample(key)
 
 
-def sample_from_base(key: KeyArray, base: BaseDensity) -> Transformed[State]:
+def sample_from_base(
+    key: KeyArray, base: OpenMMDensity
+) -> Transformed[DataWithAuxiliary]:
     return base.sample(key)
 
 
 def compute_model_likelihood(
-    samples: Transformed[AugmentedData],
-    flow: Transform[AugmentedData, State],
-    base: BaseDensity,
+    samples: Transformed[DataWithAuxiliary],
+    flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
+    base: OpenMMDensity,
 ):
-    latent, ldj = unpack(flow.forward(samples.obj))
+    latent, ldj = unpack(flow.inverse(samples.obj))
     return base.potential(latent) - ldj
 
 
 def compute_sample_energies(
-    samples: Transformed[AugmentedData],
-    target: TargetDensity,
+    samples: Transformed[DataWithAuxiliary],
+    target: OpenMMDensity,
 ):
-    aux_energies = -target.aux_model.log_prob(samples.obj.aux)
-    aux_energies = aux_energies.reshape(aux_energies.shape[0], -1).sum(axis=-1)
 
-    sample_positions = np.array(samples.obj.pos).reshape(
-        samples.obj.pos.shape[0], -1, 3
+    energies = target.compute_energies(
+        samples.obj, omm=True, aux=True, has_batch_dim=True
     )
-    box = np.diag(samples.obj.box.size[0])
-    omm_energies, _ = target.model.compute_energies_and_forces(
-        sample_positions, box
-    )
-    target_energies = omm_energies + aux_energies
+    # aux_energies = energies["aux"]
+    omm_energies = energies["omm"]
+    if samples.obj.aux is None:
+        aux_energies = 0 * omm_energies  # FIXME should work
+    else:
+        aux_energies = energies["aux"]
     return omm_energies, aux_energies
 
 
 def compute_sampling_statistics(
-    samples: Transformed[AugmentedData],
-    target: TargetDensity,
+    samples: Transformed[DataWithAuxiliary],
+    target: OpenMMDensity,
 ) -> SamplingStatistics:
 
     omm_energies, aux_energies = compute_sample_energies(samples, target)
@@ -370,7 +373,7 @@ def compute_sampling_statistics(
     model_energies = np.array(samples.ldj)
 
     target_energies = omm_energies + aux_energies
-    weights = compute_stable_weights(model_energies - target_energies)
+    weights = jax.nn.softmax(model_energies - target_energies)
 
     ess = np.square(np.sum(weights)) / np.sum(np.square(weights))
 
@@ -391,8 +394,8 @@ def save_summary(path: str, data: Any):
 @pytree_dataclass(frozen=True)
 class Reporter:
 
-    base: BaseDensity
-    target: TargetDensity
+    base: OpenMMDensity
+    target: OpenMMDensity
     run_dir: str
     specs: ReportingSpecifications
     scope: str | None
@@ -400,19 +403,20 @@ class Reporter:
     def report_model(
         self,
         key: KeyArray,
-        flow: Transform[AugmentedData, State],
+        flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
         num_iter: int,
     ):
-        return report_model(
-            key,
-            flow,
-            self.base,
-            self.target,
-            num_iter,
-            self.run_dir,
-            self.scope if self.scope else "",
-            self.specs,
-        )
+        if self.specs.num_samples is not None:
+            return report_model(
+                key,
+                flow,
+                self.base,
+                self.target,
+                num_iter,
+                self.run_dir,
+                self.scope if self.scope else "",
+                self.specs,
+            )
 
     def with_scope(self, scope) -> "Reporter":
         return Reporter(
@@ -426,9 +430,9 @@ class Reporter:
 
 def report_model(
     key: KeyArray,
-    flow: Transform[AugmentedData, State],
-    base: BaseDensity,
-    target: TargetDensity,
+    flow: Transform[DataWithAuxiliary, DataWithAuxiliary],
+    base: OpenMMDensity,
+    target: OpenMMDensity,
     tot_iter: int,
     run_dir: str,
     scope: str,
@@ -436,21 +440,22 @@ def report_model(
 ):
     chain = key_chain(key)
 
-    logger = logging.getLogger("main")
-
     logging.info("preparing report")
 
-    logging.info("sampling from data")
-    with jit_and_cleanup_cache(
-        scanned_vmap(
-            partial(sample_from_target, target=target),
-            specs.num_samples_per_batch,
-        )
-    ) as sample:
-        data_samples: Transformed[AugmentedData] = sample(
-            jax.random.split(next(chain), specs.num_samples)
-        )
-    assert data_samples is not None
+    if target.data is None:
+        logging.info("no data for target")
+    else:
+        logging.info("sampling from data")
+        with jit_and_cleanup_cache(
+            scanned_vmap(
+                partial(sample_from_target, target=target),
+                specs.num_samples_per_batch,
+            )
+        ) as sample:
+            data_samples: Transformed[DataWithAuxiliary] = sample(
+                jax.random.split(next(chain), specs.num_samples)
+            )
+        assert data_samples is not None
 
     logging.info("sampling from prior")
     with jit_and_cleanup_cache(
@@ -459,7 +464,7 @@ def report_model(
             specs.num_samples_per_batch,
         )
     ) as sample:
-        prior_samples: Transformed[State] = sample(
+        prior_samples: Transformed[DataWithAuxiliary] = sample(
             jax.random.split(next(chain), specs.num_samples)
         )
     assert prior_samples is not None
@@ -471,7 +476,7 @@ def report_model(
             specs.num_samples_per_batch,
         )
     ) as sample:
-        model_samples: Transformed[AugmentedData] = sample(
+        model_samples: Transformed[DataWithAuxiliary] = sample(
             jax.random.split(next(chain), specs.num_samples)
         )
     assert model_samples is not None
@@ -502,13 +507,15 @@ def report_model(
 
     # plot quaternion histograms
     if specs.plot_quaternions is not None:
-        data_quats = jax.vmap(InitialTransform().forward)(
+        data_quats = jax.vmap(EuclideanToRigidTransform().forward)(
             data_samples.obj
-        ).obj.rot
-        model_quats = jax.vmap(InitialTransform().forward)(
+        ).obj.rigid.rot
+        model_quats = jax.vmap(EuclideanToRigidTransform().forward)(
             model_samples.obj
-        ).obj.rot
-        prior_quats = prior_samples.obj.rot
+        ).obj.rigid.rot
+        prior_quats = jax.vmap(EuclideanToRigidTransform().forward)(
+            prior_samples.obj
+        ).obj.rigid.rot
         logging.info(f"plotting quaternions")
         fig = plot_quaternions(
             data_quats, model_quats, prior_quats, specs.plot_quaternions
@@ -517,20 +524,13 @@ def report_model(
 
     # plot oxygen histograms
     if specs.plot_oxygens:
-        # data_pos = jax.vmap(InitialTransform().forward)(
-        #     data_samples.obj
-        # ).obj.pos
-        # data_pos = data_pos - data_samples.obj.com[:, None, :
-        data_pos = data_samples.obj.pos.reshape(
-            data_samples.obj.pos.shape[0], -1, 4, 3
-        )[:, :, 0]
-        # model_pos = jax.vmap(InitialTransform().forward)(
-        #     model_samples.obj
-        # ).obj.pos
-        # model_pos = model_pos - model_samples.obj.com[:, None, :]
-        model_pos = model_samples.obj.pos.reshape(
-            model_samples.obj.pos.shape[0], -1, 4, 3
-        )[:, :, 0]
+        data_pos = data_samples.obj.pos[:, :, 0]
+        data_pos = target.box.size * data_pos
+        # data_pos = data_pos - jnp.mean(data_pos, axis=(1,), keepdims=True)
+        model_pos = model_samples.obj.pos[:, :, 0]
+        model_pos = target.box.size * model_pos
+        # model_pos = model_pos - jnp.mean(model_pos, axis=(1,), keepdims=True)
+
         logging.info(f"plotting oxygens")
         fig = plot_oxygen_positions(model_pos, data_pos, target.box)
         write_figure_to_tensorboard(f"plots/oxygens/{scope}", fig, tot_iter)

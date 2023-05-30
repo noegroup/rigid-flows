@@ -160,12 +160,13 @@ cython_debug/
 #.idea/
 
 # Jupyter notebooks
-*.ipynb
+#*.ipynb
 
 # VIM swap files
 *.sw*
 
 # renders
 *.png
+*.pdf
 
 /training/testing

@@ -16,7 +16,7 @@ from jax_dataclasses import pytree_dataclass
 from jaxtyping import Float
 
 from .data import DataWithAuxiliary
-from .nnextra import AuxConditioner, PosConditioner, RotConditioner
+from .nn import AuxConditioner, PosConditioner, RotConditioner
 from .rigid import Rigid
 from .specs import CouplingSpecification, FlowSpecification
 from .system import QUATERNION_DIM, SPATIAL_DIM, SimulationBox

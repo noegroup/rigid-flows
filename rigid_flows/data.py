@@ -1,13 +1,12 @@
 import logging
 
 import jax
-import lenses
 import numpy as np
 from jax import Array
 from jax import numpy as jnp
 from jax_dataclasses import pytree_dataclass
 
-from .system import ErrorHandling, OpenMMEnergyModel, SimulationBox, SystemSpecification
+from .system import OpenMMEnergyModel, SimulationBox, SystemSpecification
 
 logger = logging.getLogger("rigid-flows")
 
@@ -46,14 +45,12 @@ class Data:
 
 @pytree_dataclass(frozen=True)
 class PreprocessedData:
-
     pos: jnp.ndarray
     box: jnp.ndarray
     energy: jnp.ndarray
 
     @staticmethod
     def from_data(data: Data) -> "PreprocessedData":
-
         ## remove global translation using first molecule
         pos = data.pos - data.pos[:, :1, :1]
 

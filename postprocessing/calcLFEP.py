@@ -3,8 +3,8 @@
 # Postprocessing script to compute the free energy difference via LFEP.
 # example: python calcLFEP.py ../experiments/ice_N16_T100
 
-import sys
 import glob
+import sys
 from typing import cast
 
 import equinox as eqx
@@ -22,9 +22,9 @@ from rigid_flows.flow import RigidWithAuxiliary, build_flow
 from rigid_flows.specs import ExperimentSpecification
 from rigid_flows.utils import scanned_vmap
 
-# the evaluation MD trajectory should be different from the training one
-eval_subdir = "eval"
-num_eval_samples = 10_000
+# the evaluation MD trajectory should be different from the training one, to avoid bias
+eval_subdir = "" #"eval"
+num_eval_samples = 10000000
 
 # details for LFEP evaluation
 num_iterations = 10
@@ -185,9 +185,7 @@ def jitvmap(fn, batch_size=batch_size):
 
 # ## estimate LFEP with uncertainty
 
-print(
-    f"Runnig {num_iterations} iterations with {num_samples:_} samples, out of {num_eval_samples:_}"
-)
+print(f"Runnig {num_iterations} iterations with {num_samples:_} samples, out of {num_eval_samples:_}")
 
 N_k = np.array(2 * [num_samples])
 u_kn = np.zeros((2, 2 * num_samples))

@@ -169,4 +169,4 @@ cython_debug/
 *.png
 *.pdf
 
-/training/testing
+/experiments/testing

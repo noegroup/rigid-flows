@@ -9,10 +9,9 @@ Jonas Köhler, Michele Invernizzi, Pim de Haan, Frank Noé
 
 
 ## Requirements
+- [jax](https://jax.readthedocs.io/en/latest/index.html)
 - [flox](https://github.com/noegroup/flox)
 - [mlparams](https://github.com/jonkhler/mlparams)
-- [mdtraj](https://www.mdtraj.org)
 - [openmm](https://openmm.org)
-- [pymbar](https://pymbar.readthedocs.io)
-- [genice2](https://github.com/vitroid/GenIce)
+- ...
 

@@ -23,9 +23,6 @@ from tqdm import trange
 
 from rigid_flows.systems.watermodel import WaterModel
 
-# ## generate ice configuration and setup water model
-# see https://github.com/vitroid/GenIce
-
 # some options
 # import argparse
 # parser = argparse.ArgumentParser()

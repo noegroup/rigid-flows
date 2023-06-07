@@ -30,9 +30,7 @@ def setup_tensorboard(run_dir: str, label: str):
     import socket
 
     local_run_dir = f"{run_dir}/{socket.gethostname()}_{label}_{datetime.datetime.now().strftime('%Y-%m-%d_%H:%M:%S')}"
-
     writer = tf.summary.create_file_writer(local_run_dir)
-
     return writer, local_run_dir
 
 
@@ -40,26 +38,16 @@ def setup_model(key: KeyArray, specs: ExperimentSpecification):
     chain = key_chain(key)
 
     logging.info("Loading base density.")
-    num_datapoints = specs.model.base.num_samples
-    if num_datapoints is not None:
-        logging.info(f"  taking only {num_datapoints:_} samples from MD")
-        selection = np.s_[:num_datapoints]
-    else:
-        selection = np.s_[:]
-    base = OpenMMDensity.from_specs(
-        specs.model.use_auxiliary, specs.model.base, selection
-    )
+    if specs.model.base.num_samples is not None:
+        logging.info(f"  taking maximum {specs.model.base.num_samples} samples from MD")
+    base = OpenMMDensity.from_specs(specs.model.use_auxiliary, specs.model.base)
 
     logging.info(f"Loading target density.")
-    num_datapoints = specs.model.target.num_samples
-    if num_datapoints is not None:
-        logging.info(f"  taking only {num_datapoints:_} samples from MD")
-        selection = np.s_[:num_datapoints]
-    else:
-        selection = np.s_[:]
-    target = OpenMMDensity.from_specs(
-        specs.model.use_auxiliary, specs.model.target, selection
-    )
+    if specs.model.target.num_samples is not None:
+        logging.info(
+            f"  taking maximum {specs.model.target.num_samples} samples from MD"
+        )
+    target = OpenMMDensity.from_specs(specs.model.use_auxiliary, specs.model.target)
 
     logging.info(f"Setting up flow model.")
     flow = build_flow(
@@ -124,7 +112,6 @@ def train(
 
 
 def main():
-
     tf.config.experimental.set_visible_devices([], "GPU")
 
     parser = argparse.ArgumentParser()
@@ -164,6 +151,7 @@ def main():
             loss_reporter,
         )
     np.savetxt(f"{local_run_dir}/loss.txt", loss_reporter, header="loss", fmt="%g")
+
 
 if __name__ == "__main__":
     main()

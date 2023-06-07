@@ -113,12 +113,6 @@ def update_fn(
     ):
         (loss, report), grad = eqx.filter_value_and_grad(loss_fn, has_aux=True)(flow)
 
-        grad = (
-            lenses.bind(grad)
-            .Recur(EuclideanToRigidTransform)
-            .modify(lambda node: jax.tree_map(lambda x: jnp.zeros_like(x), node))
-        )
-
         updates, opt_state = optim.update(grad, opt_state)  # type: ignore
         flow = cast(
             Transform[DataWithAuxiliary, DataWithAuxiliary],

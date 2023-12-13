@@ -7,6 +7,22 @@ Jonas Köhler, Michele Invernizzi, Pim de Haan, Frank Noé ([ICML 2023](https://
 
 ![iceXI-N128-T100](https://raw.githubusercontent.com/noegroup/rigid-flows/main/ice-N128-T100.gif)
 
+## BibTeX
+```BibTeX
+@InProceedings{pmlr-v202-kohler23a,
+  title = 	 {Rigid Body Flows for Sampling Molecular Crystal Structures},
+  author =       {K\"{o}hler, Jonas and Invernizzi, Michele and De Haan, Pim and No\'{e}, Frank},
+  booktitle = 	 {Proceedings of the 40th International Conference on Machine Learning},
+  pages = 	 {17301--17326},
+  year = 	 {2023},
+  volume = 	 {202},
+  series = 	 {Proceedings of Machine Learning Research},
+  month = 	 {23--29 Jul},
+  publisher =    {PMLR},
+  pdf = 	 {https://proceedings.mlr.press/v202/kohler23a/kohler23a.pdf},
+  url = 	 {https://proceedings.mlr.press/v202/kohler23a.html}
+}
+```
 
 ## Requirements
 - [jax](https://jax.readthedocs.io/en/latest/index.html)
